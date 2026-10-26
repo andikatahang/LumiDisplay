@@ -1,0 +1,15 @@
+# Build and release artifacts
+bin/
+obj/
+publish/
+
+# IDE and OS files
+.vs/
+.vscode/
+.idea/
+*.user
+*.userosscache
+*.suo
+*.sln.docstates
+.DS_Store
+Thumbs.db
