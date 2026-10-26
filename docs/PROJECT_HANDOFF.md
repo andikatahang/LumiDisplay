@@ -1,5 +1,9 @@
 # LumiDisplay & BetterDisplay Reverse Engineering — Project Handoff
 
+> **Update (v1.1.0):** source code now lives in `src/LumiDisplay/` (build with `dotnet build src/LumiDisplay/LumiDisplay.csproj`).
+> The UI moved from the Obsidian Dark theme described below to a light theme (white / soft gray / dark blue `#1E3A8A`) — see `Theme.cs`, `ThemedControls.cs` and the README.
+> Volume keys are only taken over for monitors with a DDC/CI speaker (`AudioEndpoint.cs` + `TrayApplicationContext.GetVolumeKeyTargets`).
+
 > **Target Audience:** Next AI Model, Engineer, or Contributor resuming this project.  
 > **Date:** October 2026  
 > **Author:** Andika (`andika@users.noreply.github.com`)  

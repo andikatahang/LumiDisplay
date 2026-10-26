@@ -11,7 +11,11 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <Description>LumiDisplay - Intelligent display brightness, contrast, and audio volume control for Windows</Description>
-    <Version>1.0.0</Version>
+    <Version>1.1.0</Version>
+    <Product>LumiDisplay</Product>
+    <Authors>andikatahang</Authors>
+    <Copyright>Copyright © 2026 andikatahang</Copyright>
+    <RepositoryUrl>https://github.com/andikatahang/LumiDisplay</RepositoryUrl>
     <PublishSingleFile>true</PublishSingleFile>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
     <SelfContained>false</SelfContained>

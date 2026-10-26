@@ -84,6 +84,11 @@ public sealed class AppSettings
     /// </summary>
     public int SelectedMonitorIndex { get; set; } = -1;
 
+    /// <summary>
+    /// Whether the "still running in the tray" notice was already shown after closing the window.
+    /// </summary>
+    public bool TrayHintShown { get; set; } = false;
+
     // --- Persistence ---
 
     private static string SettingsPath =>

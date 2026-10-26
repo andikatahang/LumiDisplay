@@ -257,13 +257,16 @@ public sealed class OsdOverlay : IDisposable
 
             var card = new RectangleF(shadow, shadow, BASE_CARD_WIDTH * s, BASE_CARD_HEIGHT * s);
 
-            // Soft drop shadow: stacked translucent rounded rects, offset slightly downward
-            for (int i = (int)shadow; i >= 1; i -= Math.Max(1, (int)s))
+            // Soft drop shadow: stacked translucent rounded rects, offset slightly downward.
+            // Per-layer alpha is spread over the layer count so the total stays the same at any DPI.
+            int layers = Math.Max(1, (int)shadow);
+            int layerAlpha = Math.Max(1, 40 / layers);
+            for (int i = layers; i >= 1; i--)
             {
-                var r = RectangleF.Inflate(card, i, i);
-                r.Offset(0, 4 * s);
+                var r = RectangleF.Inflate(card, i * 0.85f, i * 0.85f);
+                r.Offset(0, 5 * s);
                 using var sp = Theme.RoundedRect(r, cornerR + i);
-                using var sb = new SolidBrush(Color.FromArgb(4, 15, 23, 42));
+                using var sb = new SolidBrush(Color.FromArgb(layerAlpha, 15, 23, 42));
                 g.FillPath(sb, sp);
             }
 

@@ -194,14 +194,14 @@ internal static class Glyphs
 }
 
 /// <summary>
-/// The LumiDisplay mark: a dark blue rounded tile holding a white monitor with a glowing sun.
+/// The LumiDisplay mark, in the same language as the UI: a white rounded "card" tile with a
+/// hairline gray border, holding a dark blue line-art monitor (soft blue screen) and a sun.
 /// Used for the .ico file, the tray icon fallback and in-app branding.
 /// </summary>
 internal static class Logo
 {
-    private static readonly Color TileTop = Color.FromArgb(39, 73, 171);    // #2749AB
-    private static readonly Color TileBottom = Color.FromArgb(15, 30, 82);  // #0F1E52
-    private static readonly Color SunRay = Color.FromArgb(191, 219, 254);   // #BFDBFE
+    private static readonly Color TileTop = Color.White;
+    private static readonly Color TileBottom = Color.FromArgb(241, 245, 249);   // #F1F5F9
 
     public static void Draw(Graphics g, RectangleF r)
     {
@@ -213,25 +213,19 @@ internal static class Logo
         bool tiny = s <= 20;
         bool small = s <= 40;
 
-        // Tile with a vertical dark blue gradient
-        using var tile = Theme.RoundedRect(r, s * 0.225f);
-        var gradRect = RectangleF.Inflate(r, 0, 1);
-        using (var grad = new LinearGradientBrush(gradRect, TileTop, TileBottom, LinearGradientMode.Vertical))
+        // White card tile with a hairline border (darker at small sizes so it reads on white)
+        float borderW = Math.Max(1f, s * 0.018f);
+        var tileRect = RectangleF.Inflate(r, -borderW / 2f, -borderW / 2f);
+        using var tile = Theme.RoundedRect(tileRect, s * 0.225f);
+        using (var grad = new LinearGradientBrush(RectangleF.Inflate(r, 0, 1), TileTop, TileBottom, LinearGradientMode.Vertical))
             g.FillPath(grad, tile);
+        using (var border = new Pen(s <= 24 ? Theme.TextFaint : Theme.BorderStrong, borderW))
+            g.DrawPath(border, tile);
 
-        // Soft sheen across the top half
-        if (!tiny)
-        {
-            g.SetClip(tile);
-            using var sheen = new SolidBrush(Color.FromArgb(13, 255, 255, 255));
-            g.FillEllipse(sheen, r.X - s * 0.3f, r.Y - s * 0.62f, s * 1.6f, s * 1.05f);
-            g.ResetClip();
-        }
-
-        // Monitor
+        // Monitor: dark blue outline over a soft accent-tinted screen
         float stroke = Math.Max(1.3f, s * (tiny ? 0.095f : 0.066f));
         var screen = new RectangleF(r.X + s * 0.18f, r.Y + s * 0.21f, s * 0.64f, s * 0.45f);
-        using var pen = new Pen(Color.White, stroke)
+        using var pen = new Pen(Theme.Accent, stroke)
         {
             StartCap = LineCap.Round,
             EndCap = LineCap.Round,
@@ -239,7 +233,7 @@ internal static class Logo
         };
         using (var screenPath = Theme.RoundedRect(screen, s * 0.075f))
         {
-            using var glass = new SolidBrush(Color.FromArgb(34, 255, 255, 255));
+            using var glass = new SolidBrush(Theme.AccentSoft);
             g.FillPath(glass, screenPath);
             g.DrawPath(pen, screenPath);
         }
@@ -251,18 +245,12 @@ internal static class Logo
         // Sun in the middle of the screen
         var c = new PointF(cx, screen.Y + screen.Height / 2f);
         float sunR = s * (tiny ? 0.1f : 0.078f);
-        if (!small)
-        {
-            using var glow = new SolidBrush(Color.FromArgb(60, SunRay));
-            float gr = sunR * 1.9f;
-            g.FillEllipse(glow, c.X - gr, c.Y - gr, gr * 2, gr * 2);
-        }
-        using (var sun = new SolidBrush(Color.White))
+        using (var sun = new SolidBrush(Theme.Accent))
             g.FillEllipse(sun, c.X - sunR, c.Y - sunR, sunR * 2, sunR * 2);
 
         if (!tiny)
         {
-            using var rayPen = new Pen(SunRay, Math.Max(1f, s * 0.032f))
+            using var rayPen = new Pen(Theme.AccentHover, Math.Max(1f, s * 0.032f))
             {
                 StartCap = LineCap.Round,
                 EndCap = LineCap.Round

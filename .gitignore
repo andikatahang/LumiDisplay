@@ -2,6 +2,10 @@
 bin/
 obj/
 publish/
+release-dist/
+
+# Reverse-engineering inputs (third-party installers) never belong in this repo
+*.dmg
 
 # IDE and OS files
 .vs/

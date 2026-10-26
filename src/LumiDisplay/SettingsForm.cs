@@ -45,6 +45,10 @@ public sealed class SettingsForm : Form
     private readonly Action _onSettingsChanged;
     private readonly Func<IReadOnlyList<IMonitor>> _getMonitors;
     private readonly Action<OsdOverlay.OsdType, double> _showOsd;
+    private readonly Action? _onQuit;
+
+    /// <summary>True when the window is closing because the user chose "Quit LumiDisplay".</summary>
+    public bool QuitRequested { get; private set; }
 
     // Navigation
     private readonly List<NavItem> _navItems = new();
@@ -87,12 +91,14 @@ public sealed class SettingsForm : Form
         AppSettings settings,
         Action onSettingsChanged,
         Func<IReadOnlyList<IMonitor>> getMonitors,
-        Action<OsdOverlay.OsdType, double> showOsd)
+        Action<OsdOverlay.OsdType, double> showOsd,
+        Action? onQuit = null)
     {
         _settings = settings;
         _onSettingsChanged = onSettingsChanged;
         _getMonitors = getMonitors;
         _showOsd = showOsd;
+        _onQuit = onQuit;
 
         InitializeComponent();
         LoadSettings();
@@ -261,13 +267,19 @@ public sealed class SettingsForm : Form
             e.Graphics.DrawLine(pen, 0, 0, footer.Width, 0);
         };
 
-        var lblHint = new Label
+        // Closing the window keeps the app in the tray; this is the explicit way out
+        var btnQuit = new RoundedButton
         {
-            Text = "Changes apply when you save.",
-            Location = new Point(CardMargin, 25),
-            AutoSize = true,
-            ForeColor = Theme.TextMuted,
+            Text = "Quit LumiDisplay",
+            Size = new Size(150, 38),
+            Location = new Point(CardMargin, 15),
             BackColor = Theme.Surface
+        };
+        btnQuit.Click += (_, _) =>
+        {
+            QuitRequested = true;
+            Close();
+            _onQuit?.Invoke();
         };
 
         var btnSave = new RoundedButton
@@ -293,7 +305,8 @@ public sealed class SettingsForm : Form
         };
         btnCancel.Click += (_, _) => Close();
 
-        footer.Controls.Add(lblHint);
+        if (_onQuit != null)
+            footer.Controls.Add(btnQuit);
         footer.Controls.Add(btnCancel);
         footer.Controls.Add(btnSave);
         return footer;
@@ -412,13 +425,13 @@ public sealed class SettingsForm : Form
         var startup = AddCard(page, "Startup", "", ref y, 2 * 60);
         int ry = startup.ContentTop;
         AddRow(startup, new SettingRow("Start with Windows", "Launch LumiDisplay automatically when you sign in.", _chkStartup), ref ry);
-        AddRow(startup, new SettingRow("Start minimized", "Stay quietly in the system tray on launch.", _chkStartMinimized), ref ry);
+        AddRow(startup, new SettingRow("Stay in tray at sign-in", "When started with Windows, don't open this window.", _chkStartMinimized), ref ry);
 
         var media = AddCard(page, "Media keys",
             "Route keyboard volume keys to monitor speakers over DDC/CI (VCP 0x62).", ref y, 2 * 60);
         ry = media.ContentTop;
-        AddRow(media, new SettingRow("Intercept volume keys", "Volume Up, Volume Down and Mute control the monitor.", _chkInterceptVolume), ref ry);
-        AddRow(media, new SettingRow("Forward to system audio", "Let Windows handle keys when the audio device has native volume.", _chkForwardNative), ref ry);
+        AddRow(media, new SettingRow("Intercept volume keys", "Volume Up, Down and Mute control monitors that have speakers.", _chkInterceptVolume), ref ry);
+        AddRow(media, new SettingRow("Forward to system audio", "Let Windows handle the keys when sound isn't playing through a monitor.", _chkForwardNative), ref ry);
     }
 
     private void BuildSteppingTab(Panel page)

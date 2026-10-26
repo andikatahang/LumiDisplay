@@ -45,11 +45,20 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private List<IMonitor> _monitors = new();
     private readonly System.Windows.Forms.Timer _monitorRefreshTimer;
+    private readonly RegisteredWaitHandle? _showWindowWait;
 
-    public TrayApplicationContext(bool openSettings = false)
+    public TrayApplicationContext(bool openSettings = false, System.Threading.EventWaitHandle? showWindowEvent = null)
     {
         _settings = AppSettings.Load();
         _osd = new OsdOverlay();
+
+        // A second launch (desktop icon, Start menu) signals this event: open the window here
+        if (showWindowEvent != null)
+        {
+            var ui = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
+            _showWindowWait = ThreadPool.RegisterWaitForSingleObject(showWindowEvent,
+                (_, _) => ui.Post(_ => ShowSettingsDialog(), null), null, Timeout.Infinite, false);
+        }
 
         // Create hidden window for hotkey messages
         _hotkeyWindow = new HiddenHotkeyWindow();
@@ -80,7 +89,11 @@ public sealed class TrayApplicationContext : ApplicationContext
             Text = "LumiDisplay — Display & Audio Control",
             ContextMenuStrip = CreateContextMenu()
         };
-        _trayIcon.DoubleClick += (_, _) => ShowSettingsDialog();
+        _trayIcon.MouseClick += (_, e) =>
+        {
+            if (e.Button == MouseButtons.Left)
+                ShowSettingsDialog();
+        };
 
         if (openSettings)
             ShowSettingsDialog();
@@ -131,8 +144,19 @@ public sealed class TrayApplicationContext : ApplicationContext
         // 2. Built-in displays via WMI (laptops/tablets)
         list.AddRange(WmiMonitor.EnumerateMonitors());
 
+        // Remember which displays have a speaker, so the keyboard hook never has to ask over DDC/CI
+        var speakers = new HashSet<IMonitor>();
+        foreach (var m in list)
+        {
+            if (m.GetVolume() != null)
+                speakers.Add(m);
+        }
+
         _monitors = list;
+        _speakerMonitors = speakers;
     }
+
+    private HashSet<IMonitor> _speakerMonitors = new();
 
     private List<IMonitor> GetTargetMonitors()
     {
@@ -143,12 +167,31 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     // --- Media key handler ---
 
+    /// <summary>
+    /// Target monitors whose speaker LumiDisplay should drive for this key press,
+    /// or an empty list when Windows should handle the volume keys itself.
+    /// </summary>
+    private List<IMonitor> GetVolumeKeyTargets()
+    {
+        // Only monitors with a DDC/CI speaker; a laptop panel or speakerless monitor
+        // must never swallow the volume keys
+        var targets = GetTargetMonitors().FindAll(m => _speakerMonitors.Contains(m));
+        if (targets.Count == 0)
+            return targets;
+
+        // Sound is playing through headphones / laptop speakers: those keys belong to Windows
+        if (_settings.ForwardToNativeWhenSupported && !AudioEndpoint.DefaultOutputIsDisplay())
+            return new List<IMonitor>();
+
+        return targets;
+    }
+
     private bool OnMediaKey(MediaKeyInterceptor.MediaKeyAction action)
     {
-        var targets = GetTargetMonitors();
+        var targets = GetVolumeKeyTargets();
         if (targets.Count == 0)
         {
-            // No DDC monitors - let system handle the keys
+            // No monitor speaker to drive - let Windows handle the keys
             return false;
         }
 
@@ -479,13 +522,8 @@ public sealed class TrayApplicationContext : ApplicationContext
         menu.Items.Add(new ToolStripSeparator());
 
         // Exit
-        var exitItem = new ToolStripMenuItem("Exit", MenuGlyph(Glyph.Power));
-        exitItem.Click += (_, _) =>
-        {
-            _trayIcon.Visible = false;
-            Cleanup();
-            Application.Exit();
-        };
+        var exitItem = new ToolStripMenuItem("Quit LumiDisplay", MenuGlyph(Glyph.Power));
+        exitItem.Click += (_, _) => ExitApplication();
         menu.Items.Add(exitItem);
 
         ApplyItemPadding(menu.Items);
@@ -515,12 +553,44 @@ public sealed class TrayApplicationContext : ApplicationContext
                     _mediaKeyInterceptor.Enabled = _settings.InterceptMediaVolumeKeys;
                 },
                 getMonitors: () => _monitors.AsReadOnly(),
-                showOsd: (type, frac) => _osd.Show(type, frac));
+                showOsd: (type, frac) => _osd.Show(type, frac),
+                onQuit: ExitApplication);
+            var form = _settingsForm;
+            form.FormClosed += (_, _) =>
+            {
+                if (!form.QuitRequested) ShowTrayHintOnce();
+            };
         }
 
+        if (_settingsForm.WindowState == FormWindowState.Minimized)
+            _settingsForm.WindowState = FormWindowState.Normal;
         _settingsForm.Show();
         _settingsForm.BringToFront();
         _settingsForm.Activate();
+    }
+
+    /// <summary>
+    /// Closing the window keeps LumiDisplay running; tell the user once where it went.
+    /// </summary>
+    private void ShowTrayHintOnce()
+    {
+        if (_settings.TrayHintShown || _exiting) return;
+        _settings.TrayHintShown = true;
+        _settings.Save();
+        _trayIcon.ShowBalloonTip(4000, "LumiDisplay is still running",
+            "It keeps handling your brightness and volume keys from the system tray. " +
+            "Click the tray icon to reopen, or right-click it to quit.",
+            ToolTipIcon.None);
+    }
+
+    private bool _exiting;
+
+    private void ExitApplication()
+    {
+        _exiting = true;
+        _trayIcon.Visible = false;
+        Cleanup();
+        Application.Exit();
     }
 
     private void SetBrightnessPercent(int percent)
@@ -628,6 +698,7 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private void Cleanup()
     {
+        _showWindowWait?.Unregister(null);
         _monitorRefreshTimer.Stop();
         _monitorRefreshTimer.Dispose();
         _mediaKeyInterceptor.Dispose();
