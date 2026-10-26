@@ -8,31 +8,35 @@ namespace LumiDisplay;
 /// <summary>
 /// Settings window for LumiDisplay.
 /// Allows configuring hotkeys, step sizes, startup preferences, and testing monitor adjustments.
+/// Light theme: white sidebar and cards on a soft-gray page, dark blue accent.
 /// </summary>
 public sealed class SettingsForm : Form
 {
-    private static readonly Color ThemeBg = Color.FromArgb(20, 18, 30);
-    private static readonly Color ThemeSurface = Color.FromArgb(28, 25, 42);
-    private static readonly Color ThemeControl = Color.FromArgb(40, 36, 60);
-    private static readonly Color ThemeBorder = Color.FromArgb(60, 54, 85);
-    private static readonly Color ThemeText = Color.FromArgb(235, 240, 250);
-    private static readonly Color ThemeTextMuted = Color.FromArgb(150, 155, 178);
-    private static readonly Color AccentCyan = Color.FromArgb(6, 182, 212);
-    private static readonly Color AccentGold = Color.FromArgb(245, 158, 11);
-    private static readonly Color AccentViolet = Color.FromArgb(168, 85, 247);
-
     [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
 
-    private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
+    private const int DWMWA_BORDER_COLOR = 34;
+    private const int DWMWA_CAPTION_COLOR = 35;
+    private const int DWMWA_TEXT_COLOR = 36;
+
+    private const int SidebarWidth = 224;
+    private const int ContentWidth = 636;
+    private const int HeaderHeight = 84;
+    private const int FooterHeight = 68;
+    private const int CardMargin = 28;
 
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
+        // Windows 11: white caption bar with dark text to match the light theme (ignored on Windows 10)
         try
         {
-            int useDarkMode = 1;
-            DwmSetWindowAttribute(Handle, DWMWA_USE_IMMERSIVE_DARK_MODE, ref useDarkMode, sizeof(int));
+            int caption = ColorTranslator.ToWin32(Theme.Surface);
+            int text = ColorTranslator.ToWin32(Theme.Text);
+            int border = ColorTranslator.ToWin32(Theme.BorderStrong);
+            DwmSetWindowAttribute(Handle, DWMWA_CAPTION_COLOR, ref caption, sizeof(int));
+            DwmSetWindowAttribute(Handle, DWMWA_TEXT_COLOR, ref text, sizeof(int));
+            DwmSetWindowAttribute(Handle, DWMWA_BORDER_COLOR, ref border, sizeof(int));
         }
         catch { }
     }
@@ -42,30 +46,41 @@ public sealed class SettingsForm : Form
     private readonly Func<IReadOnlyList<IMonitor>> _getMonitors;
     private readonly Action<OsdOverlay.OsdType, double> _showOsd;
 
+    // Navigation
+    private readonly List<NavItem> _navItems = new();
+    private readonly List<Panel> _pages = new();
+    private readonly List<(string title, string subtitle)> _pageHeaders = new();
+    private Label _lblPageTitle = null!;
+    private Label _lblPageSubtitle = null!;
+    private Label _lblMonitorStatus = null!;
+
     // Controls - General
-    private CheckBox _chkStartup = null!;
-    private CheckBox _chkStartMinimized = null!;
-    private CheckBox _chkInterceptVolume = null!;
-    private CheckBox _chkForwardNative = null!;
+    private ToggleSwitch _chkStartup = null!;
+    private ToggleSwitch _chkStartMinimized = null!;
+    private ToggleSwitch _chkInterceptVolume = null!;
+    private ToggleSwitch _chkForwardNative = null!;
 
     // Controls - Stepping
     private NumericUpDown _numTotalSteps = null!;
     private NumericUpDown _numStandardStep = null!;
     private NumericUpDown _numFineStep = null!;
-    private CheckBox _chkFineVolumeDefault = null!;
-    private CheckBox _chkFineVideoDefault = null!;
-    private Label _lblStepSummary = null!;
+    private ToggleSwitch _chkFineVolumeDefault = null!;
+    private ToggleSwitch _chkFineVideoDefault = null!;
+    private StepPreview _stepPreview = null!;
 
     // Controls - Hotkeys
-    private CheckBox _chkBrightnessHotkeys = null!;
-    private CheckBox _chkContrastHotkeys = null!;
+    private ToggleSwitch _chkBrightnessHotkeys = null!;
+    private ToggleSwitch _chkContrastHotkeys = null!;
 
     // Controls - Monitors & Testing
     private ComboBox _cboTargetMonitor = null!;
-    private Label _lblMonitorDetails = null!;
-    private TrackBar _tbTestBrightness = null!;
+    private StatTile _tileType = null!;
+    private StatTile _tileBrightness = null!;
+    private StatTile _tileVolume = null!;
+    private StatTile _tileContrast = null!;
+    private SliderBar _tbTestBrightness = null!;
     private Label _lblTestBrightness = null!;
-    private TrackBar _tbTestVolume = null!;
+    private SliderBar _tbTestVolume = null!;
     private Label _lblTestVolume = null!;
 
     public SettingsForm(
@@ -81,423 +96,542 @@ public sealed class SettingsForm : Form
 
         InitializeComponent();
         LoadSettings();
+        SelectPage(0);
     }
 
     private void InitializeComponent()
     {
-        Text = "LumiDisplay — Display & Audio Settings";
-        Size = new Size(560, 480);
-        FormBorderStyle = FormBorderStyle.FixedDialog;
+        SuspendLayout();
+        AutoScaleDimensions = new SizeF(96F, 96F);
+        AutoScaleMode = AutoScaleMode.Dpi;
+
+        Text = "LumiDisplay Settings";
+        ClientSize = new Size(SidebarWidth + ContentWidth, 600);
+        FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox = false;
-        MinimizeBox = false;
+        MinimizeBox = true;
         StartPosition = FormStartPosition.CenterScreen;
         ShowInTaskbar = true;
-        Font = new Font("Segoe UI", 9F, FontStyle.Regular);
-        BackColor = ThemeBg;
-        ForeColor = ThemeText;
+        KeyPreview = true;
+        Font = new Font(Theme.FontFamily, 9F, FontStyle.Regular);
+        BackColor = Theme.Window;
+        ForeColor = Theme.Text;
+        try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
 
-        var tabControl = new TabControl
+        // Content area (right): header, scrollable pages, footer
+        var header = new Panel
         {
-            Dock = DockStyle.Top,
-            Height = 380,
-            Padding = new Point(14, 6),
-            DrawMode = TabDrawMode.OwnerDrawFixed,
-            SizeMode = TabSizeMode.Fixed,
-            ItemSize = new Size(125, 32)
+            Location = new Point(SidebarWidth, 0),
+            Size = new Size(ContentWidth, HeaderHeight),
+            BackColor = Theme.Window
         };
+        _lblPageTitle = new Label
+        {
+            Location = new Point(CardMargin, 22),
+            AutoSize = true,
+            Font = new Font(Theme.FontFamilySemibold, 15F),
+            ForeColor = Theme.Text,
+            UseMnemonic = false
+        };
+        _lblPageSubtitle = new Label
+        {
+            Location = new Point(CardMargin + 2, 54),
+            AutoSize = true,
+            Font = new Font(Theme.FontFamily, 9F),
+            ForeColor = Theme.TextMuted
+        };
+        header.Controls.Add(_lblPageTitle);
+        header.Controls.Add(_lblPageSubtitle);
 
-        tabControl.DrawItem += (s, e) =>
+        AddPage("General", Glyph.Gear, "General", "Startup behaviour and media key handling.", BuildGeneralTab);
+        AddPage("Stepping & OSD", Glyph.Sliders, "Stepping & OSD", "How far each key press moves brightness and volume.", BuildSteppingTab);
+        AddPage("Hotkeys", Glyph.Keyboard, "Hotkeys", "Global keyboard shortcuts for your displays.", BuildHotkeysTab);
+        AddPage("Monitors & Test", Glyph.Monitor, "Monitors & Test", "Pick a target display and try changes live.", BuildMonitorsTab);
+
+        var footer = BuildFooter();
+        var sidebar = BuildSidebar();
+
+        Controls.Add(header);
+        foreach (var page in _pages)
+            Controls.Add(page);
+        Controls.Add(footer);
+        Controls.Add(sidebar);
+
+        ResumeLayout(false);
+    }
+
+    // --- Shell ---
+
+    private Panel BuildSidebar()
+    {
+        var sidebar = new Panel
+        {
+            Location = new Point(0, 0),
+            Size = new Size(SidebarWidth, 600),
+            BackColor = Theme.Surface
+        };
+        sidebar.Paint += (_, e) =>
         {
             var g = e.Graphics;
-            var tabRect = tabControl.GetTabRect(e.Index);
-            bool isSelected = tabControl.SelectedIndex == e.Index;
+            float s = sidebar.DeviceDpi / 96f;
+            Logo.Draw(g, new RectangleF(20 * s, 22 * s, 38 * s, 38 * s));
 
-            using var bgBrush = new SolidBrush(isSelected ? ThemeSurface : ThemeBg);
-            g.FillRectangle(bgBrush, tabRect);
+            using var nameFont = new Font(Theme.FontFamilySemibold, 12.5F);
+            using var tagFont = new Font(Theme.FontFamily, 8.25F);
+            TextRenderer.DrawText(g, "LumiDisplay", nameFont, new Point((int)(68 * s), (int)(21 * s)), Theme.Text,
+                TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
+            TextRenderer.DrawText(g, "Display & audio control", tagFont, new Point((int)(69 * s), (int)(45 * s)), Theme.TextMuted,
+                TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
 
-            if (isSelected)
-            {
-                using var activePen = new Pen(AccentCyan, 2.5f);
-                g.DrawLine(activePen, tabRect.Left + 6, tabRect.Bottom - 2, tabRect.Right - 6, tabRect.Bottom - 2);
-            }
-
-            string title = tabControl.TabPages[e.Index].Text;
-            Color textColor = isSelected ? AccentCyan : ThemeTextMuted;
-            TextRenderer.DrawText(g, title, tabControl.Font, tabRect, textColor,
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+            using var border = new Pen(Theme.Border, 1f);
+            g.DrawLine(border, sidebar.Width - 1, 0, sidebar.Width - 1, sidebar.Height);
         };
 
-        // Tab 1: General
-        var tabGeneral = new TabPage("General") { BackColor = ThemeSurface, ForeColor = ThemeText };
-        BuildGeneralTab(tabGeneral);
-        tabControl.TabPages.Add(tabGeneral);
-
-        // Tab 2: Stepping & OSD
-        var tabStepping = new TabPage("Stepping & OSD") { BackColor = ThemeSurface, ForeColor = ThemeText };
-        BuildSteppingTab(tabStepping);
-        tabControl.TabPages.Add(tabStepping);
-
-        // Tab 3: Hotkeys
-        var tabHotkeys = new TabPage("Hotkeys") { BackColor = ThemeSurface, ForeColor = ThemeText };
-        BuildHotkeysTab(tabHotkeys);
-        tabControl.TabPages.Add(tabHotkeys);
-
-        // Tab 4: Monitors & Test
-        var tabMonitors = new TabPage("Monitors & Test") { BackColor = ThemeSurface, ForeColor = ThemeText };
-        BuildMonitorsTab(tabMonitors);
-        tabControl.TabPages.Add(tabMonitors);
-
-        // Bottom panel for buttons
-        var bottomPanel = new Panel
+        var lblSection = new Label
         {
-            Dock = DockStyle.Bottom,
-            Height = 52,
-            Padding = new Padding(12),
-            BackColor = ThemeBg
+            Text = "SETTINGS",
+            Location = new Point(26, 86),
+            AutoSize = true,
+            Font = new Font(Theme.FontFamilySemibold, 7.5F),
+            ForeColor = Theme.TextFaint
+        };
+        sidebar.Controls.Add(lblSection);
+
+        for (int i = 0; i < _navItems.Count; i++)
+        {
+            var nav = _navItems[i];
+            nav.Location = new Point(12, 108 + i * 44);
+            sidebar.Controls.Add(nav);
+        }
+
+        // Status block at the bottom of the sidebar
+        var status = new Panel
+        {
+            Location = new Point(12, 600 - 88),
+            Size = new Size(200, 64),
+            BackColor = Theme.Surface
+        };
+        status.Paint += (_, e) =>
+        {
+            var g = e.Graphics;
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            float s = status.DeviceDpi / 96f;
+            using var path = Theme.RoundedRect(new RectangleF(0.5f, 0.5f, status.Width - 1.5f, status.Height - 1.5f), 10 * s);
+            using var fill = new SolidBrush(Theme.Window);
+            g.FillPath(fill, path);
+            using var dot = new SolidBrush(_getMonitors().Count > 0 ? Theme.Success : Theme.TextFaint);
+            g.FillEllipse(dot, 14 * s, 17 * s, 8 * s, 8 * s);
+        };
+        _lblMonitorStatus = new Label
+        {
+            Location = new Point(28, 12),
+            AutoSize = true,
+            Font = new Font(Theme.FontFamilySemibold, 8.75F),
+            ForeColor = Theme.Text,
+            BackColor = Theme.Window
+        };
+        var version = typeof(SettingsForm).Assembly.GetName().Version;
+        var lblVersion = new Label
+        {
+            Text = $"Version {version?.Major}.{version?.Minor}.{version?.Build}",
+            Location = new Point(28, 34),
+            AutoSize = true,
+            Font = new Font(Theme.FontFamily, 8F),
+            ForeColor = Theme.TextMuted,
+            BackColor = Theme.Window
+        };
+        status.Controls.Add(_lblMonitorStatus);
+        status.Controls.Add(lblVersion);
+        sidebar.Controls.Add(status);
+
+        return sidebar;
+    }
+
+    private Panel BuildFooter()
+    {
+        var footer = new Panel
+        {
+            Location = new Point(SidebarWidth, 600 - FooterHeight),
+            Size = new Size(ContentWidth, FooterHeight),
+            BackColor = Theme.Surface
+        };
+        footer.Paint += (_, e) =>
+        {
+            using var pen = new Pen(Theme.Border, 1f);
+            e.Graphics.DrawLine(pen, 0, 0, footer.Width, 0);
         };
 
-        var btnSave = new Button
+        var lblHint = new Label
         {
-            Text = "Save & Apply",
-            DialogResult = DialogResult.OK,
-            Size = new Size(120, 32),
-            Location = new Point(Width - 250, 10),
-            BackColor = AccentCyan,
-            ForeColor = Color.FromArgb(15, 23, 42),
-            Font = new Font(Font, FontStyle.Bold),
-            FlatStyle = FlatStyle.Flat,
-            Cursor = Cursors.Hand
+            Text = "Changes apply when you save.",
+            Location = new Point(CardMargin, 25),
+            AutoSize = true,
+            ForeColor = Theme.TextMuted,
+            BackColor = Theme.Surface
         };
-        btnSave.FlatAppearance.BorderSize = 0;
+
+        var btnSave = new RoundedButton
+        {
+            Text = "Save changes",
+            Primary = true,
+            Size = new Size(132, 38),
+            Location = new Point(ContentWidth - CardMargin - 132, 15),
+            BackColor = Theme.Surface
+        };
         btnSave.Click += (_, _) =>
         {
             SaveSettings();
             Close();
         };
 
-        var btnCancel = new Button
+        var btnCancel = new RoundedButton
         {
             Text = "Cancel",
-            DialogResult = DialogResult.Cancel,
-            Size = new Size(95, 32),
-            Location = new Point(Width - 118, 10),
-            BackColor = ThemeControl,
-            ForeColor = ThemeText,
-            FlatStyle = FlatStyle.Flat,
-            Cursor = Cursors.Hand
+            Size = new Size(100, 38),
+            Location = new Point(ContentWidth - CardMargin - 132 - 10 - 100, 15),
+            BackColor = Theme.Surface
         };
-        btnCancel.FlatAppearance.BorderColor = ThemeBorder;
         btnCancel.Click += (_, _) => Close();
 
-        bottomPanel.Controls.Add(btnSave);
-        bottomPanel.Controls.Add(btnCancel);
-
-        Controls.Add(tabControl);
-        Controls.Add(bottomPanel);
+        footer.Controls.Add(lblHint);
+        footer.Controls.Add(btnCancel);
+        footer.Controls.Add(btnSave);
+        return footer;
     }
 
-    private void BuildGeneralTab(TabPage page)
+    private void AddPage(string navText, Glyph glyph, string title, string subtitle, Action<Panel> build)
     {
-        page.Padding = new Padding(16);
+        int index = _pages.Count;
+        var nav = new NavItem(navText, glyph);
+        nav.Click += (_, _) => SelectPage(index);
+        _navItems.Add(nav);
 
-        _chkStartup = new CheckBox
+        var page = new Panel
         {
-            Text = "Start with Windows (Launch automatically on login)",
-            AutoSize = true,
-            Location = new Point(20, 20),
-            ForeColor = ThemeText
+            Location = new Point(SidebarWidth, HeaderHeight),
+            Size = new Size(ContentWidth, 600 - HeaderHeight - FooterHeight),
+            BackColor = Theme.Window,
+            AutoScroll = true,
+            Visible = false
         };
+        build(page);
 
-        _chkStartMinimized = new CheckBox
-        {
-            Text = "Start minimized to system tray",
-            AutoSize = true,
-            Location = new Point(20, 55),
-            ForeColor = ThemeText
-        };
+        // Bottom spacer so the last card does not touch the footer when scrolled
+        int bottom = 0;
+        foreach (Control c in page.Controls)
+            bottom = Math.Max(bottom, c.Bottom);
+        page.Controls.Add(new Panel { Location = new Point(0, bottom), Size = new Size(1, 20), BackColor = Theme.Window });
 
-        var grpMedia = new GroupBox
-        {
-            Text = "Media Keys Interception",
-            Location = new Point(15, 95),
-            Size = new Size(500, 120),
-            Padding = new Padding(12),
-            ForeColor = AccentGold,
-            BackColor = ThemeSurface
-        };
-
-        _chkInterceptVolume = new CheckBox
-        {
-            Text = "Intercept native media volume keys (Volume Up, Down, Mute)",
-            AutoSize = true,
-            Location = new Point(15, 25),
-            ForeColor = ThemeText
-        };
-
-        _chkForwardNative = new CheckBox
-        {
-            Text = "Forward to system audio when active device supports native volume",
-            AutoSize = true,
-            Location = new Point(15, 55),
-            ForeColor = ThemeText
-        };
-
-        var lblNote = new Label
-        {
-            Text = "When enabled, pressing keyboard volume keys will adjust external monitor speaker volume via DDC/CI (VCP 0x62) instead of Windows system volume.",
-            ForeColor = ThemeTextMuted,
-            Location = new Point(15, 82),
-            Size = new Size(470, 32)
-        };
-
-        grpMedia.Controls.Add(_chkInterceptVolume);
-        grpMedia.Controls.Add(_chkForwardNative);
-        grpMedia.Controls.Add(lblNote);
-
-        page.Controls.Add(_chkStartup);
-        page.Controls.Add(_chkStartMinimized);
-        page.Controls.Add(grpMedia);
+        _pages.Add(page);
+        _pageHeaders.Add((title, subtitle));
     }
 
-    private void BuildSteppingTab(TabPage page)
+    private void SelectPage(int index)
     {
-        page.Padding = new Padding(16);
-
-        var lblTotal = new Label { Text = "Total logical steps:", Location = new Point(20, 22), AutoSize = true, ForeColor = ThemeText };
-        _numTotalSteps = new NumericUpDown
+        for (int i = 0; i < _pages.Count; i++)
         {
-            Location = new Point(220, 20),
-            Size = new Size(70, 25),
-            Minimum = 16,
-            Maximum = 256,
-            Value = 64,
-            BackColor = ThemeControl,
-            ForeColor = ThemeText
+            _pages[i].Visible = i == index;
+            _navItems[i].Selected = i == index;
+        }
+        _lblPageTitle.Text = _pageHeaders[index].title;
+        _lblPageSubtitle.Text = _pageHeaders[index].subtitle;
+    }
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        // Ctrl+Tab / Ctrl+Shift+Tab and Ctrl+1..4 switch pages
+        int current = _pages.FindIndex(p => p.Visible);
+        if (e.Control && e.KeyCode == Keys.Tab)
+        {
+            int next = (current + (e.Shift ? -1 : 1) + _pages.Count) % _pages.Count;
+            SelectPage(next);
+            e.Handled = true;
+        }
+        else if (e.Control && e.KeyCode >= Keys.D1 && e.KeyCode < Keys.D1 + _pages.Count)
+        {
+            SelectPage(e.KeyCode - Keys.D1);
+            e.Handled = true;
+        }
+        else if (e.KeyCode == Keys.Escape)
+        {
+            Close();
+            e.Handled = true;
+        }
+        base.OnKeyDown(e);
+    }
+
+    // --- Layout helpers ---
+
+    private static Card AddCard(Panel page, string title, string description, ref int y, int contentHeight)
+    {
+        var card = new Card
+        {
+            Title = title,
+            Description = description,
+            Location = new Point(CardMargin, y),
+            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
         };
+        card.Size = new Size(ContentWidth - CardMargin * 2, card.ContentTop + contentHeight + 8);
+        page.Controls.Add(card);
+        y += card.Height + 16;
+        return card;
+    }
+
+    private static void AddRow(Card card, Control row, ref int y)
+    {
+        // Inset so rows never paint over the card's border, even after DPI rounding
+        row.Location = new Point(2, y);
+        row.Width = card.Width - 4;
+        card.Controls.Add(row);
+        y += row.Height;
+    }
+
+    private static NumericUpDown CreateNumber(int min, int max, int value) => new()
+    {
+        Size = new Size(76, 27),
+        Minimum = min,
+        Maximum = max,
+        Value = value,
+        BorderStyle = BorderStyle.FixedSingle,
+        BackColor = Theme.Surface,
+        ForeColor = Theme.Accent,
+        Font = new Font(Theme.FontFamilySemibold, 10F),
+        TextAlign = HorizontalAlignment.Center
+    };
+
+    // --- Pages ---
+
+    private void BuildGeneralTab(Panel page)
+    {
+        _chkStartup = new ToggleSwitch();
+        _chkStartMinimized = new ToggleSwitch();
+        _chkInterceptVolume = new ToggleSwitch();
+        _chkForwardNative = new ToggleSwitch();
+
+        int y = 4;
+        var startup = AddCard(page, "Startup", "", ref y, 2 * 60);
+        int ry = startup.ContentTop;
+        AddRow(startup, new SettingRow("Start with Windows", "Launch LumiDisplay automatically when you sign in.", _chkStartup), ref ry);
+        AddRow(startup, new SettingRow("Start minimized", "Stay quietly in the system tray on launch.", _chkStartMinimized), ref ry);
+
+        var media = AddCard(page, "Media keys",
+            "Route keyboard volume keys to monitor speakers over DDC/CI (VCP 0x62).", ref y, 2 * 60);
+        ry = media.ContentTop;
+        AddRow(media, new SettingRow("Intercept volume keys", "Volume Up, Volume Down and Mute control the monitor.", _chkInterceptVolume), ref ry);
+        AddRow(media, new SettingRow("Forward to system audio", "Let Windows handle keys when the audio device has native volume.", _chkForwardNative), ref ry);
+    }
+
+    private void BuildSteppingTab(Panel page)
+    {
+        _numTotalSteps = CreateNumber(16, 256, 64);
+        _numStandardStep = CreateNumber(1, 64, 4);
+        _numFineStep = CreateNumber(1, 16, 1);
         _numTotalSteps.ValueChanged += (_, _) => UpdateStepSummary();
-
-        var lblStandard = new Label { Text = "Standard step size (steps):", Location = new Point(20, 57), AutoSize = true, ForeColor = ThemeText };
-        _numStandardStep = new NumericUpDown
-        {
-            Location = new Point(220, 55),
-            Size = new Size(70, 25),
-            Minimum = 1,
-            Maximum = 64,
-            Value = 4,
-            BackColor = ThemeControl,
-            ForeColor = ThemeText
-        };
         _numStandardStep.ValueChanged += (_, _) => UpdateStepSummary();
-
-        var lblFine = new Label { Text = "Fine step size (steps):", Location = new Point(20, 92), AutoSize = true, ForeColor = ThemeText };
-        _numFineStep = new NumericUpDown
-        {
-            Location = new Point(220, 90),
-            Size = new Size(70, 25),
-            Minimum = 1,
-            Maximum = 16,
-            Value = 1,
-            BackColor = ThemeControl,
-            ForeColor = ThemeText
-        };
         _numFineStep.ValueChanged += (_, _) => UpdateStepSummary();
+        _chkFineVolumeDefault = new ToggleSwitch();
+        _chkFineVideoDefault = new ToggleSwitch();
+        _stepPreview = new StepPreview();
 
-        _chkFineVolumeDefault = new CheckBox
-        {
-            Text = "Use fine scale by default for volume media keys",
-            AutoSize = true,
-            Location = new Point(20, 130),
-            ForeColor = ThemeText
-        };
+        int y = 4;
+        var steps = AddCard(page, "Step sizes", "16 OSD chiclets, 4 logical steps each by default.", ref y, 3 * 60 + 92);
+        int ry = steps.ContentTop;
+        AddRow(steps, new SettingRow("Total logical steps", "Resolution of the full 0–100% range.", _numTotalSteps), ref ry);
+        AddRow(steps, new SettingRow("Standard step", "Logical steps per normal key press.", _numStandardStep), ref ry);
+        AddRow(steps, new SettingRow("Fine step", "Logical steps per press with Shift held.", _numFineStep), ref ry);
+        AddRow(steps, _stepPreview, ref ry);
 
-        _chkFineVideoDefault = new CheckBox
-        {
-            Text = "Use fine scale by default for brightness hotkeys",
-            AutoSize = true,
-            Location = new Point(20, 160),
-            ForeColor = ThemeText
-        };
-
-        _lblStepSummary = new Label
-        {
-            Location = new Point(20, 200),
-            Size = new Size(480, 85),
-            ForeColor = AccentCyan,
-            BackColor = ThemeControl,
-            Padding = new Padding(8)
-        };
-
-        page.Controls.Add(lblTotal);
-        page.Controls.Add(_numTotalSteps);
-        page.Controls.Add(lblStandard);
-        page.Controls.Add(_numStandardStep);
-        page.Controls.Add(lblFine);
-        page.Controls.Add(_numFineStep);
-        page.Controls.Add(_chkFineVolumeDefault);
-        page.Controls.Add(_chkFineVideoDefault);
-        page.Controls.Add(_lblStepSummary);
+        var fine = AddCard(page, "Fine scale by default", "", ref y, 2 * 60);
+        ry = fine.ContentTop;
+        AddRow(fine, new SettingRow("Volume media keys", "Use the fine step for Volume Up and Down.", _chkFineVolumeDefault), ref ry);
+        AddRow(fine, new SettingRow("Brightness hotkeys", "Swap standard and fine steps for brightness.", _chkFineVideoDefault), ref ry);
 
         UpdateStepSummary();
     }
 
     private void UpdateStepSummary()
     {
-        int total = (int)_numTotalSteps.Value;
-        int standard = (int)_numStandardStep.Value;
-        int fine = (int)_numFineStep.Value;
-
-        double stdPct = (double)standard / total * 100.0;
-        double finePct = (double)fine / total * 100.0;
-        int chiclets = total / 4;
-
-        _lblStepSummary.Text =
-            $"Configuration Summary:\n" +
-            $"• {total} total steps (simulates {chiclets} OSD chiclets with {total / Math.Max(1, chiclets)} steps each)\n" +
-            $"• Standard step: {standard} logical steps = {stdPct:F2}% per press (1 chiclet)\n" +
-            $"• Fine step: {fine} logical steps = {finePct:F2}% per press (0.25 chiclet)\n" +
-            $"• Matches BetterDisplay's native macOS stepping behaviour.";
+        _stepPreview.SetSteps((int)_numTotalSteps.Value, (int)_numStandardStep.Value, (int)_numFineStep.Value);
     }
 
-    private void BuildHotkeysTab(TabPage page)
+    private void BuildHotkeysTab(Panel page)
     {
-        page.Padding = new Padding(16);
+        _chkBrightnessHotkeys = new ToggleSwitch();
+        _chkContrastHotkeys = new ToggleSwitch();
 
-        _chkBrightnessHotkeys = new CheckBox
-        {
-            Text = "Enable Brightness Hotkeys",
-            AutoSize = true,
-            Location = new Point(20, 20),
-            ForeColor = ThemeText
-        };
+        int y = 4;
+        var bright = AddCard(page, "Brightness", "", ref y, 4 * 42);
+        bright.HeaderControl = _chkBrightnessHotkeys;
+        int ry = bright.ContentTop;
+        AddRow(bright, new ShortcutRow("Brightness up", "standard step", "Ctrl", "Alt", "↑"), ref ry);
+        AddRow(bright, new ShortcutRow("Brightness down", "standard step", "Ctrl", "Alt", "↓"), ref ry);
+        AddRow(bright, new ShortcutRow("Brightness up", "fine step", "Ctrl", "Alt", "Shift", "↑"), ref ry);
+        AddRow(bright, new ShortcutRow("Brightness down", "fine step", "Ctrl", "Alt", "Shift", "↓"), ref ry);
 
-        var lblBrightKeys = new Label
-        {
-            Text = "• Ctrl + Alt + Up: Brightness Up (Standard Step)\n" +
-                   "• Ctrl + Alt + Down: Brightness Down (Standard Step)\n" +
-                   "• Ctrl + Alt + Shift + Up: Brightness Up (Fine Step)\n" +
-                   "• Ctrl + Alt + Shift + Down: Brightness Down (Fine Step)",
-            Location = new Point(40, 48),
-            Size = new Size(460, 75),
-            ForeColor = ThemeTextMuted
-        };
+        var contrast = AddCard(page, "Contrast", "", ref y, 2 * 42);
+        contrast.HeaderControl = _chkContrastHotkeys;
+        ry = contrast.ContentTop;
+        AddRow(contrast, new ShortcutRow("Contrast up", "", "Ctrl", "Alt", "→"), ref ry);
+        AddRow(contrast, new ShortcutRow("Contrast down", "", "Ctrl", "Alt", "←"), ref ry);
 
-        _chkContrastHotkeys = new CheckBox
-        {
-            Text = "Enable Contrast Hotkeys",
-            AutoSize = true,
-            Location = new Point(20, 135),
-            ForeColor = ThemeText
-        };
-
-        var lblContrastKeys = new Label
-        {
-            Text = "• Ctrl + Alt + Right: Contrast Up\n" +
-                   "• Ctrl + Alt + Left: Contrast Down",
-            Location = new Point(40, 163),
-            Size = new Size(460, 45),
-            ForeColor = ThemeTextMuted
-        };
-
-        var lblVolumeKeys = new Label
-        {
-            Text = "Media Keys (when Intercept Volume Keys is enabled):\n" +
-                   "• Volume Up: Speaker Volume Up\n" +
-                   "• Volume Down: Speaker Volume Down\n" +
-                   "• Volume Mute: Speaker Mute Toggle",
-            Location = new Point(20, 220),
-            Size = new Size(480, 60),
-            ForeColor = AccentCyan
-        };
-
-        page.Controls.Add(_chkBrightnessHotkeys);
-        page.Controls.Add(lblBrightKeys);
-        page.Controls.Add(_chkContrastHotkeys);
-        page.Controls.Add(lblContrastKeys);
-        page.Controls.Add(lblVolumeKeys);
+        var media = AddCard(page, "Media keys", "Active when “Intercept volume keys” is on.", ref y, 3 * 42);
+        ry = media.ContentTop;
+        AddRow(media, new ShortcutRow("Speaker volume up", "", "Volume +"), ref ry);
+        AddRow(media, new ShortcutRow("Speaker volume down", "", "Volume −"), ref ry);
+        AddRow(media, new ShortcutRow("Toggle speaker mute", "", "Mute"), ref ry);
     }
 
-    private void BuildMonitorsTab(TabPage page)
+    private void BuildMonitorsTab(Panel page)
     {
-        page.Padding = new Padding(16);
+        int y = 4;
+        var target = AddCard(page, "Target display", "", ref y, 40 + 60 + 12);
 
-        var lblTarget = new Label { Text = "Target Monitor:", Location = new Point(20, 18), AutoSize = true, ForeColor = ThemeText };
+        // Flat ComboBox has no border of its own; host it in a rounded outlined frame
+        var comboHost = new Panel
+        {
+            Location = new Point(20, target.ContentTop - 2),
+            Size = new Size(target.Width - 40 - 96 - 10, 34),
+            BackColor = Theme.Surface,
+            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+        };
+        comboHost.Paint += (_, e) =>
+        {
+            e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            float s = comboHost.DeviceDpi / 96f;
+            using var path = Theme.RoundedRect(new RectangleF(0.5f, 0.5f, comboHost.Width - 1.5f, comboHost.Height - 1.5f), 8 * s);
+            using var pen = new Pen(_cboTargetMonitor.Focused ? Theme.Accent : Theme.BorderStrong, 1f);
+            e.Graphics.DrawPath(pen, path);
+        };
+        comboHost.Resize += (_, _) => comboHost.Invalidate();
+
         _cboTargetMonitor = new ComboBox
         {
-            Location = new Point(130, 15),
-            Size = new Size(360, 25),
+            Location = new Point(6, 3),
+            Size = new Size(comboHost.Width - 12, 28),
             DropDownStyle = ComboBoxStyle.DropDownList,
-            BackColor = ThemeControl,
-            ForeColor = ThemeText,
-            FlatStyle = FlatStyle.Flat
+            FlatStyle = FlatStyle.Flat,
+            BackColor = Theme.Surface,
+            ForeColor = Theme.Text,
+            DrawMode = DrawMode.OwnerDrawFixed,
+            ItemHeight = 24,
+            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+        };
+        _cboTargetMonitor.DrawItem += (_, e) =>
+        {
+            if (e.Index < 0) return;
+            bool selected = (e.State & DrawItemState.Selected) != 0 && (e.State & DrawItemState.ComboBoxEdit) == 0;
+            using var bg = new SolidBrush(selected ? Theme.AccentSoft : Theme.Surface);
+            e.Graphics.FillRectangle(bg, e.Bounds);
+            var textRect = Rectangle.Inflate(e.Bounds, -6, 0);
+            TextRenderer.DrawText(e.Graphics, _cboTargetMonitor.Items[e.Index]?.ToString(), _cboTargetMonitor.Font, textRect,
+                selected ? Theme.Accent : Theme.Text,
+                TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
         };
         _cboTargetMonitor.SelectedIndexChanged += (_, _) => UpdateMonitorDetails();
+        _cboTargetMonitor.GotFocus += (_, _) => comboHost.Invalidate();
+        _cboTargetMonitor.LostFocus += (_, _) => comboHost.Invalidate();
+        comboHost.Controls.Add(_cboTargetMonitor);
 
-        _lblMonitorDetails = new Label
+        var btnRefresh = new RoundedButton
         {
-            Location = new Point(20, 50),
-            Size = new Size(470, 70),
-            BorderStyle = BorderStyle.FixedSingle,
-            Padding = new Padding(8),
-            BackColor = ThemeControl,
-            ForeColor = ThemeText
+            Text = "Refresh",
+            Size = new Size(96, 30),
+            Location = new Point(target.Width - 20 - 96, target.ContentTop - 1),
+            BackColor = Theme.Surface,
+            Anchor = AnchorStyles.Top | AnchorStyles.Right
         };
+        btnRefresh.Click += (_, _) => PopulateMonitorsList();
 
-        var grpTest = new GroupBox
-        {
-            Text = "Live Adjustment Test",
-            Location = new Point(15, 130),
-            Size = new Size(485, 140),
-            Padding = new Padding(12),
-            ForeColor = AccentGold,
-            BackColor = ThemeSurface
-        };
+        int tileGap = 10;
+        int tileW = (target.Width - 40 - tileGap * 3) / 4;
+        int tileY = target.ContentTop + 44;
+        _tileType = new StatTile("Type") { Location = new Point(20, tileY), Width = tileW };
+        _tileBrightness = new StatTile("Brightness") { Location = new Point(20 + (tileW + tileGap), tileY), Width = tileW };
+        _tileVolume = new StatTile("Volume") { Location = new Point(20 + (tileW + tileGap) * 2, tileY), Width = tileW };
+        _tileContrast = new StatTile("Contrast") { Location = new Point(20 + (tileW + tileGap) * 3, tileY), Width = tileW };
 
-        var lblB = new Label { Text = "Brightness:", Location = new Point(15, 25), AutoSize = true, ForeColor = ThemeText };
-        _tbTestBrightness = new TrackBar
-        {
-            Location = new Point(90, 20),
-            Size = new Size(320, 45),
-            Minimum = 0,
-            Maximum = 100,
-            TickFrequency = 10,
-            BackColor = ThemeSurface
-        };
-        _lblTestBrightness = new Label { Text = "50%", Location = new Point(420, 25), AutoSize = true, ForeColor = AccentGold };
+        target.Controls.Add(comboHost);
+        target.Controls.Add(btnRefresh);
+        target.Controls.Add(_tileType);
+        target.Controls.Add(_tileBrightness);
+        target.Controls.Add(_tileVolume);
+        target.Controls.Add(_tileContrast);
+
+        var test = AddCard(page, "Live adjustment test", "Moves the selected display in real time.", ref y, 2 * 50 + 4);
+        int ry = test.ContentTop;
+        (_tbTestBrightness, _lblTestBrightness) = AddSliderRow(test, Glyph.Sun, "Brightness", ref ry);
+        (_tbTestVolume, _lblTestVolume) = AddSliderRow(test, Glyph.Speaker, "Volume", ref ry);
+
         _tbTestBrightness.Scroll += (_, _) =>
         {
             _lblTestBrightness.Text = $"{_tbTestBrightness.Value}%";
             ApplyTestBrightness((uint)_tbTestBrightness.Value);
         };
-
-        var lblV = new Label { Text = "Volume:", Location = new Point(15, 75), AutoSize = true, ForeColor = ThemeText };
-        _tbTestVolume = new TrackBar
-        {
-            Location = new Point(90, 70),
-            Size = new Size(320, 45),
-            Minimum = 0,
-            Maximum = 100,
-            TickFrequency = 10,
-            BackColor = ThemeSurface
-        };
-        _lblTestVolume = new Label { Text = "50%", Location = new Point(420, 75), AutoSize = true, ForeColor = AccentCyan };
         _tbTestVolume.Scroll += (_, _) =>
         {
             _lblTestVolume.Text = $"{_tbTestVolume.Value}%";
             ApplyTestVolume((uint)_tbTestVolume.Value);
         };
-
-        grpTest.Controls.Add(lblB);
-        grpTest.Controls.Add(_tbTestBrightness);
-        grpTest.Controls.Add(_lblTestBrightness);
-        grpTest.Controls.Add(lblV);
-        grpTest.Controls.Add(_tbTestVolume);
-        grpTest.Controls.Add(_lblTestVolume);
-
-        page.Controls.Add(lblTarget);
-        page.Controls.Add(_cboTargetMonitor);
-        page.Controls.Add(_lblMonitorDetails);
-        page.Controls.Add(grpTest);
     }
+
+    private static (SliderBar slider, Label value) AddSliderRow(Card card, Glyph glyph, string caption, ref int y)
+    {
+        int rowY = y;
+        var icon = new Panel
+        {
+            Location = new Point(20, rowY + 9),
+            Size = new Size(32, 32),
+            BackColor = Theme.Surface
+        };
+        icon.Paint += (_, e) =>
+        {
+            e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            float s = icon.DeviceDpi / 96f;
+            using var bg = Theme.RoundedRect(new RectangleF(0, 0, icon.Width - 1, icon.Height - 1), 8 * s);
+            using var fill = new SolidBrush(Theme.AccentSoft);
+            e.Graphics.FillPath(fill, bg);
+            Glyphs.Draw(e.Graphics, glyph, new RectangleF(7 * s, 7 * s, 18 * s, 18 * s), Theme.Accent);
+        };
+
+        var label = new Label
+        {
+            Text = caption,
+            Location = new Point(62, rowY + 16),
+            AutoSize = true,
+            Font = new Font(Theme.FontFamilySemibold, 9.5F),
+            ForeColor = Theme.Text,
+            BackColor = Theme.Surface
+        };
+
+        var slider = new SliderBar
+        {
+            Location = new Point(150, rowY + 11),
+            Size = new Size(card.Width - 150 - 80, 28),
+            BackColor = Theme.Surface,
+            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+        };
+
+        var value = new Label
+        {
+            Text = "50%",
+            Location = new Point(card.Width - 20 - 50, rowY + 15),
+            Size = new Size(50, 22),
+            TextAlign = ContentAlignment.MiddleRight,
+            Font = new Font(Theme.FontFamilySemibold, 10F),
+            ForeColor = Theme.Accent,
+            BackColor = Theme.Surface,
+            Anchor = AnchorStyles.Top | AnchorStyles.Right
+        };
+
+        card.Controls.Add(icon);
+        card.Controls.Add(label);
+        card.Controls.Add(slider);
+        card.Controls.Add(value);
+        y += 50;
+        return (slider, value);
+    }
+
+    // --- Data ---
 
     private void LoadSettings()
     {
@@ -521,15 +655,18 @@ public sealed class SettingsForm : Form
     private void PopulateMonitorsList()
     {
         _cboTargetMonitor.Items.Clear();
-        _cboTargetMonitor.Items.Add("All Monitors (Synchronized)");
+        _cboTargetMonitor.Items.Add("All monitors (synchronized)");
 
         var monitors = _getMonitors();
         for (int i = 0; i < monitors.Count; i++)
         {
             var m = monitors[i];
-            string type = m.IsBuiltIn ? "[WMI Built-in]" : "[DDC/CI]";
-            _cboTargetMonitor.Items.Add($"{i + 1}. {m.Description} {type}");
+            string type = m.IsBuiltIn ? "Built-in · WMI" : "DDC/CI";
+            _cboTargetMonitor.Items.Add($"{i + 1}. {m.Description}  ({type})");
         }
+
+        _lblMonitorStatus.Text = monitors.Count == 1 ? "1 display detected" : $"{monitors.Count} displays detected";
+        _lblMonitorStatus.Parent?.Invalidate();
 
         if (_settings.SelectedMonitorIndex >= 0 && _settings.SelectedMonitorIndex < monitors.Count)
             _cboTargetMonitor.SelectedIndex = _settings.SelectedMonitorIndex + 1;
@@ -546,9 +683,10 @@ public sealed class SettingsForm : Form
 
         if (sel <= 0 || sel - 1 >= monitors.Count)
         {
-            _lblMonitorDetails.Text =
-                $"Controlling {monitors.Count} connected monitor(s).\n" +
-                $"Adjustments will be synchronized across all capable displays.";
+            _tileType.Value = monitors.Count == 1 ? "1 display" : $"{monitors.Count} displays";
+            _tileBrightness.Value = "Synced";
+            _tileVolume.Value = "Synced";
+            _tileContrast.Value = "Synced";
             return;
         }
 
@@ -557,14 +695,10 @@ public sealed class SettingsForm : Form
         var vol = m.GetVolume();
         var contrast = m.GetContrast();
 
-        string brightStr = bright.HasValue ? $"{bright.Value.current}/{bright.Value.max} ({bright.Value.current * 100 / Math.Max(1, bright.Value.max)}%)" : "Unsupported";
-        string volStr = vol.HasValue ? $"{vol.Value.current}/{vol.Value.max} ({vol.Value.current * 100 / Math.Max(1, vol.Value.max)}%)" : "Unsupported";
-        string contrastStr = contrast.HasValue ? $"{contrast.Value.current}/{contrast.Value.max}" : "Unsupported";
-
-        _lblMonitorDetails.Text =
-            $"Name: {m.Description}\n" +
-            $"Type: {(m.IsBuiltIn ? "Built-in panel (WMI)" : "External monitor (DDC/CI)")}\n" +
-            $"Brightness: {brightStr} | Volume: {volStr} | Contrast: {contrastStr}";
+        _tileType.Value = m.IsBuiltIn ? "Built-in" : "DDC/CI";
+        _tileBrightness.Value = bright.HasValue ? $"{bright.Value.current * 100 / Math.Max(1, bright.Value.max)}%" : "N/A";
+        _tileVolume.Value = vol.HasValue ? $"{vol.Value.current * 100 / Math.Max(1, vol.Value.max)}%" : "N/A";
+        _tileContrast.Value = contrast.HasValue ? $"{contrast.Value.current}/{contrast.Value.max}" : "N/A";
 
         if (bright.HasValue && bright.Value.max > 0)
         {

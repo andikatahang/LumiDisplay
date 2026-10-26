@@ -1,0 +1,749 @@
+using System;
+using System.ComponentModel;
+using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Windows.Forms;
+
+namespace LumiDisplay;
+
+/// <summary>
+/// Base for the owner-drawn light theme controls: double buffered, DPI-aware painting.
+/// Layout passed in by callers is in 96-DPI units and scaled by the form's AutoScaleMode;
+/// offsets used while painting are scaled with <see cref="Px"/>.
+/// </summary>
+internal abstract class ThemedControl : Control
+{
+    protected ThemedControl()
+    {
+        SetStyle(ControlStyles.AllPaintingInWmPaint
+               | ControlStyles.OptimizedDoubleBuffer
+               | ControlStyles.UserPaint
+               | ControlStyles.ResizeRedraw, true);
+    }
+
+    protected float Scale96 => DeviceDpi / 96f;
+    protected float Px(float value) => value * Scale96;
+    protected int PxI(float value) => (int)Math.Round(value * Scale96);
+
+    protected static void PrepareGraphics(Graphics g)
+    {
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+        g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+    }
+}
+
+/// <summary>
+/// iOS / Windows 11 style on-off switch with a short knob animation.
+/// </summary>
+internal sealed class ToggleSwitch : ThemedControl
+{
+    private bool _checked;
+    private bool _hover;
+    private float _knob;
+    private readonly System.Windows.Forms.Timer _anim = new() { Interval = 15 };
+
+    public event EventHandler? CheckedChanged;
+
+    public ToggleSwitch()
+    {
+        SetStyle(ControlStyles.Selectable, true);
+        Size = new Size(44, 24);
+        Cursor = Cursors.Hand;
+        TabStop = true;
+        _anim.Tick += (_, _) =>
+        {
+            float target = _checked ? 1f : 0f;
+            _knob += Math.Sign(target - _knob) * 0.18f;
+            if (Math.Abs(target - _knob) < 0.18f)
+            {
+                _knob = target;
+                _anim.Stop();
+            }
+            Invalidate();
+        };
+    }
+
+    [DefaultValue(false)]
+    public bool Checked
+    {
+        get => _checked;
+        set
+        {
+            if (_checked == value) return;
+            _checked = value;
+            if (Visible && IsHandleCreated) _anim.Start();
+            else _knob = value ? 1f : 0f;
+            Invalidate();
+            CheckedChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    protected override void OnClick(EventArgs e)
+    {
+        Focus();
+        Checked = !Checked;
+        base.OnClick(e);
+    }
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        if (e.KeyCode == Keys.Space)
+        {
+            Checked = !Checked;
+            e.Handled = true;
+        }
+        base.OnKeyDown(e);
+    }
+
+    protected override void OnMouseEnter(EventArgs e) { _hover = true; Invalidate(); base.OnMouseEnter(e); }
+    protected override void OnMouseLeave(EventArgs e) { _hover = false; Invalidate(); base.OnMouseLeave(e); }
+    protected override void OnGotFocus(EventArgs e) { Invalidate(); base.OnGotFocus(e); }
+    protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        PrepareGraphics(g);
+        g.Clear(BackColor);
+
+        float inset = Px(2);
+        var track = new RectangleF(inset, inset, Width - inset * 2 - 1, Height - inset * 2 - 1);
+
+        if (Focused && ShowFocusCues)
+        {
+            using var ring = Theme.RoundedRect(RectangleF.Inflate(track, Px(1.5f), Px(1.5f)), track.Height);
+            using var ringPen = new Pen(Color.FromArgb(110, Theme.Accent), Px(1.5f));
+            g.DrawPath(ringPen, ring);
+        }
+
+        var off = _hover ? Theme.TextFaint : Theme.BorderStrong;
+        var on = _hover ? Theme.AccentHover : Theme.Accent;
+        using (var trackPath = Theme.RoundedRect(track, track.Height / 2))
+        using (var trackBrush = new SolidBrush(Theme.Blend(off, on, _knob)))
+            g.FillPath(trackBrush, trackPath);
+
+        float d = track.Height - Px(5);
+        float x = track.X + Px(2.5f) + _knob * (track.Width - d - Px(5));
+        float y = track.Y + Px(2.5f);
+        using (var shadow = new SolidBrush(Color.FromArgb(40, 15, 23, 42)))
+            g.FillEllipse(shadow, x, y + Px(1), d, d);
+        using (var knob = new SolidBrush(Color.White))
+            g.FillEllipse(knob, x, y, d, d);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) _anim.Dispose();
+        base.Dispose(disposing);
+    }
+}
+
+/// <summary>
+/// Rounded flat button. Primary buttons are filled dark blue, secondary are white with a gray outline.
+/// </summary>
+internal sealed class RoundedButton : ThemedControl
+{
+    private bool _hover;
+    private bool _pressed;
+
+    [DefaultValue(false)]
+    public bool Primary { get; set; }
+
+    public RoundedButton()
+    {
+        SetStyle(ControlStyles.Selectable, true);
+        Size = new Size(110, 36);
+        Cursor = Cursors.Hand;
+        TabStop = true;
+        Font = new Font(Theme.FontFamilySemibold, 9.5f);
+    }
+
+    protected override void OnMouseEnter(EventArgs e) { _hover = true; Invalidate(); base.OnMouseEnter(e); }
+    protected override void OnMouseLeave(EventArgs e) { _hover = false; _pressed = false; Invalidate(); base.OnMouseLeave(e); }
+    protected override void OnMouseDown(MouseEventArgs e) { _pressed = true; Invalidate(); base.OnMouseDown(e); }
+    protected override void OnMouseUp(MouseEventArgs e) { _pressed = false; Invalidate(); base.OnMouseUp(e); }
+    protected override void OnGotFocus(EventArgs e) { Invalidate(); base.OnGotFocus(e); }
+    protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        if (e.KeyCode is Keys.Space or Keys.Enter)
+        {
+            OnClick(EventArgs.Empty);
+            e.Handled = true;
+        }
+        base.OnKeyDown(e);
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        PrepareGraphics(g);
+        g.Clear(BackColor);
+
+        var rect = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
+        using var path = Theme.RoundedRect(rect, Px(8));
+
+        Color fill, border, text;
+        if (Primary)
+        {
+            fill = _pressed ? Theme.AccentPressed : _hover ? Theme.AccentHover : Theme.Accent;
+            border = fill;
+            text = Color.White;
+        }
+        else
+        {
+            fill = _pressed ? Theme.Border : _hover ? Theme.SurfaceAlt : Theme.Surface;
+            border = Theme.BorderStrong;
+            text = Theme.Text;
+        }
+
+        using (var brush = new SolidBrush(fill))
+            g.FillPath(brush, path);
+        using (var pen = new Pen(border, 1f))
+            g.DrawPath(pen, path);
+
+        if (Focused && ShowFocusCues)
+        {
+            using var ring = Theme.RoundedRect(RectangleF.Inflate(rect, -Px(2.5f), -Px(2.5f)), Px(6));
+            using var ringPen = new Pen(Primary ? Color.FromArgb(160, 255, 255, 255) : Color.FromArgb(120, Theme.Accent), Px(1.2f));
+            g.DrawPath(ringPen, ring);
+        }
+
+        TextRenderer.DrawText(g, Text, Font, ClientRectangle, text,
+            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
+    }
+}
+
+/// <summary>
+/// White rounded card with a hairline border and a title (plus optional description).
+/// Child controls start at <see cref="ContentTop"/>; an optional header control sits at the top-right.
+/// </summary>
+internal sealed class Card : Panel
+{
+    private Control? _headerControl;
+
+    public string Title { get; set; } = "";
+    public string Description { get; set; } = "";
+
+    /// <summary>Y (96-DPI units) where the card's rows begin.</summary>
+    public int ContentTop => string.IsNullOrEmpty(Description) ? 52 : 72;
+
+    public Card()
+    {
+        SetStyle(ControlStyles.AllPaintingInWmPaint
+               | ControlStyles.OptimizedDoubleBuffer
+               | ControlStyles.UserPaint
+               | ControlStyles.ResizeRedraw, true);
+        BackColor = Theme.Surface;
+    }
+
+    public Control? HeaderControl
+    {
+        get => _headerControl;
+        set
+        {
+            _headerControl = value;
+            if (value == null) return;
+            value.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            Controls.Add(value);
+            PlaceHeaderControl();
+        }
+    }
+
+    protected override void OnResize(EventArgs eventargs)
+    {
+        base.OnResize(eventargs);
+        PlaceHeaderControl();
+    }
+
+    private void PlaceHeaderControl()
+    {
+        if (_headerControl == null) return;
+        float s = DeviceDpi / 96f;
+        _headerControl.Location = new Point(
+            Width - _headerControl.Width - (int)(20 * s),
+            (int)(16 * s) + ((int)(22 * s) - _headerControl.Height) / 2);
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+        float s = DeviceDpi / 96f;
+
+        g.Clear(Parent?.BackColor ?? Theme.Window);
+        var rect = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
+        using (var path = Theme.RoundedRect(rect, 12 * s))
+        {
+            using var fill = new SolidBrush(Theme.Surface);
+            g.FillPath(fill, path);
+            using var pen = new Pen(Theme.Border, 1f);
+            g.DrawPath(pen, path);
+        }
+
+        using var titleFont = new Font(Theme.FontFamilySemibold, 10.5f);
+        TextRenderer.DrawText(g, Title, titleFont, new Point((int)(20 * s), (int)(17 * s)), Theme.Text,
+            TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
+
+        if (!string.IsNullOrEmpty(Description))
+        {
+            using var descFont = new Font(Theme.FontFamily, 8.75f);
+            TextRenderer.DrawText(g, Description, descFont, new Point((int)(20 * s), (int)(41 * s)), Theme.TextMuted,
+                TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
+        }
+    }
+}
+
+/// <summary>
+/// A row inside a <see cref="Card"/>: title and description on the left, an input on the right,
+/// separated from the previous row by a hairline divider.
+/// </summary>
+internal sealed class SettingRow : ThemedControl
+{
+    private readonly Control _input;
+    private readonly string _title;
+    private readonly string _description;
+
+    public SettingRow(string title, string description, Control input)
+    {
+        _title = title;
+        _description = description;
+        _input = input;
+        BackColor = Theme.Surface;
+        Height = 60;
+        Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+        Controls.Add(input);
+    }
+
+    protected override void OnLayout(LayoutEventArgs levent)
+    {
+        base.OnLayout(levent);
+        _input.Location = new Point(Width - _input.Width - PxI(20), (Height - _input.Height) / 2);
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        PrepareGraphics(g);
+        g.Clear(BackColor);
+
+        using (var divider = new Pen(Theme.Border, 1f))
+            g.DrawLine(divider, Px(20), 0, Width - Px(20), 0);
+
+        int textWidth = Math.Max(10, _input.Left - PxI(40));
+        using var titleFont = new Font(Theme.FontFamilySemibold, 9.5f);
+        using var descFont = new Font(Theme.FontFamily, 8.75f);
+
+        bool hasDesc = !string.IsNullOrEmpty(_description);
+        int titleY = hasDesc ? PxI(12) : (Height - titleFont.Height) / 2;
+        TextRenderer.DrawText(g, _title, titleFont,
+            new Rectangle(PxI(20), titleY, textWidth, titleFont.Height), Theme.Text,
+            TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
+        if (hasDesc)
+        {
+            TextRenderer.DrawText(g, _description, descFont,
+                new Rectangle(PxI(20), PxI(33), textWidth, descFont.Height + 2), Theme.TextMuted,
+                TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
+        }
+    }
+}
+
+/// <summary>
+/// A keyboard shortcut row: action on the left, key caps on the right.
+/// </summary>
+internal sealed class ShortcutRow : ThemedControl
+{
+    private readonly string _action;
+    private readonly string _hint;
+    private readonly string[] _keys;
+
+    public ShortcutRow(string action, string hint, params string[] keys)
+    {
+        _action = action;
+        _hint = hint;
+        _keys = keys;
+        BackColor = Theme.Surface;
+        Height = 42;
+        Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        PrepareGraphics(g);
+        g.Clear(BackColor);
+
+        using (var divider = new Pen(Theme.Border, 1f))
+            g.DrawLine(divider, Px(20), 0, Width - Px(20), 0);
+
+        using var font = new Font(Theme.FontFamily, 9.25f);
+        using var hintFont = new Font(Theme.FontFamily, 8.5f);
+        using var keyFont = new Font(Theme.FontFamilySemibold, 8.25f);
+
+        var flags = TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine;
+        var actionSize = TextRenderer.MeasureText(g, _action, font, Size.Empty, flags);
+        TextRenderer.DrawText(g, _action, font, new Rectangle(PxI(20), 0, actionSize.Width + 2, Height), Theme.Text, flags);
+        if (!string.IsNullOrEmpty(_hint))
+        {
+            TextRenderer.DrawText(g, _hint, hintFont,
+                new Rectangle(PxI(20) + actionSize.Width + PxI(8), 0, PxI(200), Height), Theme.TextFaint, flags);
+        }
+
+        // Key caps, right-aligned
+        float x = Width - Px(20);
+        float capH = Px(24);
+        float y = (Height - capH) / 2f;
+        for (int i = _keys.Length - 1; i >= 0; i--)
+        {
+            var textSize = TextRenderer.MeasureText(g, _keys[i], keyFont, Size.Empty, flags);
+            float capW = Math.Max(capH, textSize.Width + Px(16));
+            x -= capW;
+            var cap = new RectangleF(x, y, capW, capH);
+            using (var capPath = Theme.RoundedRect(cap, Px(6)))
+            {
+                using var fill = new SolidBrush(Theme.SurfaceAlt);
+                g.FillPath(fill, capPath);
+                using var border = new Pen(Theme.BorderStrong, 1f);
+                g.DrawPath(border, capPath);
+            }
+            // Bottom edge gives the cap a little depth
+            using (var edge = new Pen(Theme.BorderStrong, Px(1.5f)))
+                g.DrawLine(edge, cap.X + Px(5), cap.Bottom, cap.Right - Px(5), cap.Bottom);
+
+            TextRenderer.DrawText(g, _keys[i], keyFont, Rectangle.Round(cap), Theme.Accent,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
+
+            if (i > 0)
+            {
+                x -= Px(18);
+                TextRenderer.DrawText(g, "+", hintFont, new Rectangle((int)x, 0, PxI(18), Height), Theme.TextFaint,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+            }
+        }
+    }
+}
+
+/// <summary>
+/// Horizontal slider with a dark blue fill and a round white thumb.
+/// Raises <see cref="Scroll"/> only for user interaction, like <see cref="TrackBar.Scroll"/>.
+/// </summary>
+internal sealed class SliderBar : ThemedControl
+{
+    private int _value = 50;
+    private bool _dragging;
+    private bool _hover;
+
+    public int Minimum { get; set; }
+    public int Maximum { get; set; } = 100;
+
+    public event EventHandler? Scroll;
+
+    public SliderBar()
+    {
+        SetStyle(ControlStyles.Selectable, true);
+        Height = 28;
+        Cursor = Cursors.Hand;
+        TabStop = true;
+    }
+
+    public int Value
+    {
+        get => _value;
+        set
+        {
+            value = Math.Clamp(value, Minimum, Maximum);
+            if (_value == value) return;
+            _value = value;
+            Invalidate();
+        }
+    }
+
+    private float ThumbD => Px(18);
+    private float TrackLeft => ThumbD / 2 + 1;
+    private float TrackRight => Width - ThumbD / 2 - 1;
+
+    private void SetFromX(int x)
+    {
+        float t = (x - TrackLeft) / Math.Max(1, TrackRight - TrackLeft);
+        int v = Minimum + (int)Math.Round(Math.Clamp(t, 0f, 1f) * (Maximum - Minimum));
+        if (v != _value)
+        {
+            Value = v;
+            Scroll?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    protected override void OnMouseDown(MouseEventArgs e)
+    {
+        Focus();
+        if (e.Button == MouseButtons.Left)
+        {
+            _dragging = true;
+            Capture = true;
+            SetFromX(e.X);
+        }
+        base.OnMouseDown(e);
+    }
+
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        if (_dragging) SetFromX(e.X);
+        base.OnMouseMove(e);
+    }
+
+    protected override void OnMouseUp(MouseEventArgs e)
+    {
+        _dragging = false;
+        Capture = false;
+        Invalidate();
+        base.OnMouseUp(e);
+    }
+
+    protected override void OnMouseEnter(EventArgs e) { _hover = true; Invalidate(); base.OnMouseEnter(e); }
+    protected override void OnMouseLeave(EventArgs e) { _hover = false; Invalidate(); base.OnMouseLeave(e); }
+    protected override void OnGotFocus(EventArgs e) { Invalidate(); base.OnGotFocus(e); }
+    protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
+
+    protected override bool IsInputKey(Keys keyData) =>
+        keyData is Keys.Left or Keys.Right or Keys.Up or Keys.Down || base.IsInputKey(keyData);
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        int delta = e.KeyCode switch
+        {
+            Keys.Left or Keys.Down => -1,
+            Keys.Right or Keys.Up => 1,
+            Keys.PageDown => -10,
+            Keys.PageUp => 10,
+            Keys.Home => Minimum - _value,
+            Keys.End => Maximum - _value,
+            _ => 0
+        };
+        if (delta != 0)
+        {
+            int before = _value;
+            Value = _value + delta;
+            if (_value != before) Scroll?.Invoke(this, EventArgs.Empty);
+            e.Handled = true;
+        }
+        base.OnKeyDown(e);
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        PrepareGraphics(g);
+        g.Clear(BackColor);
+
+        float cy = Height / 2f;
+        float trackH = Px(6);
+        float t = (float)(_value - Minimum) / Math.Max(1, Maximum - Minimum);
+        float thumbX = TrackLeft + t * (TrackRight - TrackLeft);
+
+        using (var track = Theme.RoundedRect(new RectangleF(TrackLeft, cy - trackH / 2, TrackRight - TrackLeft, trackH), trackH / 2))
+        using (var trackBrush = new SolidBrush(Theme.Border))
+            g.FillPath(trackBrush, track);
+
+        if (thumbX > TrackLeft)
+        {
+            using var fill = Theme.RoundedRect(new RectangleF(TrackLeft, cy - trackH / 2, thumbX - TrackLeft, trackH), trackH / 2);
+            using var fillBrush = new SolidBrush(_hover || _dragging ? Theme.AccentHover : Theme.Accent);
+            g.FillPath(fillBrush, fill);
+        }
+
+        float d = ThumbD;
+        var thumb = new RectangleF(thumbX - d / 2, cy - d / 2, d, d);
+        if (Focused && ShowFocusCues)
+        {
+            using var halo = new SolidBrush(Color.FromArgb(45, Theme.Accent));
+            g.FillEllipse(halo, RectangleF.Inflate(thumb, Px(4), Px(4)));
+        }
+        using (var shadow = new SolidBrush(Color.FromArgb(35, 15, 23, 42)))
+            g.FillEllipse(shadow, thumb.X, thumb.Y + Px(1), d, d);
+        using (var white = new SolidBrush(Color.White))
+            g.FillEllipse(white, thumb);
+        using (var ring = new Pen(Theme.Accent, Px(2)))
+            g.DrawEllipse(ring, RectangleF.Inflate(thumb, -Px(1), -Px(1)));
+    }
+}
+
+/// <summary>
+/// Sidebar navigation entry with a glyph; the selected entry gets a tinted pill and accent bar.
+/// </summary>
+internal sealed class NavItem : ThemedControl
+{
+    private bool _selected;
+    private bool _hover;
+
+    public Glyph Glyph { get; }
+
+    public NavItem(string text, Glyph glyph)
+    {
+        Text = text;
+        Glyph = glyph;
+        Size = new Size(200, 40);
+        Cursor = Cursors.Hand;
+        BackColor = Theme.Surface;
+    }
+
+    public bool Selected
+    {
+        get => _selected;
+        set { _selected = value; Invalidate(); }
+    }
+
+    protected override void OnMouseEnter(EventArgs e) { _hover = true; Invalidate(); base.OnMouseEnter(e); }
+    protected override void OnMouseLeave(EventArgs e) { _hover = false; Invalidate(); base.OnMouseLeave(e); }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        PrepareGraphics(g);
+        g.Clear(BackColor);
+
+        var rect = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
+        if (_selected || _hover)
+        {
+            using var path = Theme.RoundedRect(rect, Px(8));
+            using var brush = new SolidBrush(_selected ? Theme.AccentSoft : Theme.SurfaceAlt);
+            g.FillPath(brush, path);
+        }
+        if (_selected)
+        {
+            float barH = Px(18);
+            using var bar = Theme.RoundedRect(new RectangleF(0, (Height - barH) / 2, Px(3.5f), barH), Px(1.75f));
+            using var barBrush = new SolidBrush(Theme.Accent);
+            g.FillPath(barBrush, bar);
+        }
+
+        var color = _selected ? Theme.Accent : Theme.TextMuted;
+        float gs = Px(18);
+        Glyphs.Draw(g, Glyph, new RectangleF(Px(14), (Height - gs) / 2, gs, gs), color);
+
+        using var font = _selected ? new Font(Theme.FontFamilySemibold, 9.5f) : new Font(Theme.FontFamily, 9.5f);
+        TextRenderer.DrawText(g, Text, font, new Rectangle(PxI(44), 0, Width - PxI(48), Height),
+            _selected ? Theme.Accent : Theme.TextSecondary,
+            TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
+    }
+}
+
+/// <summary>
+/// Small stat tile: caption on top, value below, on a soft-gray rounded background.
+/// </summary>
+internal sealed class StatTile : ThemedControl
+{
+    private string _value = "—";
+
+    public string Caption { get; }
+
+    public StatTile(string caption)
+    {
+        Caption = caption;
+        Size = new Size(120, 60);
+        BackColor = Theme.Surface;
+    }
+
+    public string Value
+    {
+        get => _value;
+        set { _value = value; Invalidate(); }
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        PrepareGraphics(g);
+        g.Clear(BackColor);
+
+        var rect = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
+        using (var path = Theme.RoundedRect(rect, Px(10)))
+        {
+            using var fill = new SolidBrush(Color.FromArgb(248, 250, 252));
+            g.FillPath(fill, path);
+            using var pen = new Pen(Theme.Border, 1f);
+            g.DrawPath(pen, path);
+        }
+
+        using var capFont = new Font(Theme.FontFamily, 8f);
+        using var valFont = new Font(Theme.FontFamilySemibold, 11f);
+        var flags = TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine;
+        TextRenderer.DrawText(g, Caption.ToUpperInvariant(), capFont,
+            new Rectangle(PxI(12), PxI(10), Width - PxI(20), capFont.Height), Theme.TextMuted, flags);
+        TextRenderer.DrawText(g, _value, valFont,
+            new Rectangle(PxI(12), PxI(28), Width - PxI(20), valFont.Height + 2),
+            _value == "—" || _value == "N/A" ? Theme.TextFaint : Theme.Accent, flags);
+    }
+}
+
+/// <summary>
+/// Visual preview of the stepping configuration: one OSD bar with the standard and fine
+/// step sizes highlighted, plus a one-line summary.
+/// </summary>
+internal sealed class StepPreview : ThemedControl
+{
+    private int _total = 64;
+    private int _standard = 4;
+    private int _fine = 1;
+
+    public StepPreview()
+    {
+        BackColor = Theme.Surface;
+        Height = 92;
+        Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+    }
+
+    public void SetSteps(int total, int standard, int fine)
+    {
+        _total = Math.Max(1, total);
+        _standard = standard;
+        _fine = fine;
+        Invalidate();
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        PrepareGraphics(g);
+        g.Clear(BackColor);
+
+        var box = new RectangleF(Px(20), Px(4), Width - Px(40), Height - Px(16));
+        using (var path = Theme.RoundedRect(box, Px(10)))
+        {
+            using var fill = new SolidBrush(Theme.AccentSoft);
+            g.FillPath(fill, path);
+        }
+
+        const int chiclets = 16;
+        float gap = Px(4);
+        float barX = box.X + Px(16);
+        float barW = box.Width - Px(32);
+        float cw = (barW - gap * (chiclets - 1)) / chiclets;
+        float ch = Px(10);
+        float barY = box.Y + Px(16);
+
+        double stdFrac = (double)_standard / _total;
+        double fineFrac = (double)_fine / _total;
+        for (int i = 0; i < chiclets; i++)
+        {
+            double start = (double)i / chiclets;
+            Color c = start < stdFrac ? Theme.Accent
+                    : start < stdFrac + fineFrac ? Color.FromArgb(120, Theme.Accent)
+                    : Color.White;
+            var r = new RectangleF(barX + i * (cw + gap), barY, cw, ch);
+            using var p = Theme.RoundedRect(r, Px(3));
+            using var b = new SolidBrush(c);
+            g.FillPath(b, p);
+        }
+
+        double stdPct = stdFrac * 100.0;
+        double finePct = fineFrac * 100.0;
+        string summary = $"Standard press  {stdPct:F2}%   ·   Fine press  {finePct:F2}%   ·   {_total} logical steps";
+        using var font = new Font(Theme.FontFamily, 8.75f);
+        TextRenderer.DrawText(g, summary, font,
+            new Rectangle((int)barX, (int)(barY + ch + Px(10)), (int)barW, font.Height + 4), Theme.Accent,
+            TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine);
+    }
+}

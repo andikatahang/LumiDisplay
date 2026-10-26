@@ -46,7 +46,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     private List<IMonitor> _monitors = new();
     private readonly System.Windows.Forms.Timer _monitorRefreshTimer;
 
-    public TrayApplicationContext()
+    public TrayApplicationContext(bool openSettings = false)
     {
         _settings = AppSettings.Load();
         _osd = new OsdOverlay();
@@ -81,6 +81,9 @@ public sealed class TrayApplicationContext : ApplicationContext
             ContextMenuStrip = CreateContextMenu()
         };
         _trayIcon.DoubleClick += (_, _) => ShowSettingsDialog();
+
+        if (openSettings)
+            ShowSettingsDialog();
     }
 
     private void RegisterConfiguredHotkeys()
@@ -305,22 +308,35 @@ public sealed class TrayApplicationContext : ApplicationContext
         var menu = new ContextMenuStrip
         {
             Renderer = new LumiDisplayMenuRenderer(),
-            BackColor = Color.FromArgb(20, 18, 30),
-            ForeColor = Color.FromArgb(235, 240, 250),
+            BackColor = Theme.Surface,
+            ForeColor = Theme.Text,
+            Font = new Font(Theme.FontFamily, 9F),
+            Padding = new Padding(4, 6, 4, 6),
             ShowCheckMargin = false,
             ShowImageMargin = true
         };
 
+        // Header with the app mark
+        var header = new ToolStripLabel("LumiDisplay")
+        {
+            Image = Logo.ToBitmap(32),
+            Font = new Font(Theme.FontFamilySemibold, 10F),
+            ForeColor = Theme.Accent,
+            Padding = new Padding(0, 4, 0, 6)
+        };
+        menu.Items.Add(header);
+
         // Settings / Preferences item
-        var settingsItem = new ToolStripMenuItem("⚙️ Preferences / Settings...");
-        settingsItem.Font = new Font(settingsItem.Font, FontStyle.Bold);
+        var settingsItem = new ToolStripMenuItem("Settings…", MenuGlyph(Glyph.Gear));
+        settingsItem.Font = new Font(Theme.FontFamilySemibold, 9F);
         settingsItem.Click += (_, _) => ShowSettingsDialog();
         menu.Items.Add(settingsItem);
 
         menu.Items.Add(new ToolStripSeparator());
 
         // Monitor list submenu
-        var monitorsMenu = new ToolStripMenuItem("🖥️ Monitors");
+        var monitorsMenu = new ToolStripMenuItem("Monitors", MenuGlyph(Glyph.Monitor));
+        monitorsMenu.DropDown.Renderer = menu.Renderer;
         monitorsMenu.DropDownOpening += (_, _) =>
         {
             monitorsMenu.DropDownItems.Clear();
@@ -360,13 +376,17 @@ public sealed class TrayApplicationContext : ApplicationContext
             var refreshItem = new ToolStripMenuItem("Refresh");
             refreshItem.Click += (_, _) => RefreshMonitors();
             monitorsMenu.DropDownItems.Add(refreshItem);
+            ApplyItemPadding(monitorsMenu.DropDownItems);
         };
+        // Placeholder so the submenu arrow shows before the first open
+        monitorsMenu.DropDownItems.Add(new ToolStripMenuItem("(Loading…)") { Enabled = false });
         menu.Items.Add(monitorsMenu);
 
         menu.Items.Add(new ToolStripSeparator());
 
         // Quick adjust submenu
-        var brightnessMenu = new ToolStripMenuItem("☀️ Brightness");
+        var brightnessMenu = new ToolStripMenuItem("Brightness", MenuGlyph(Glyph.Sun));
+        brightnessMenu.DropDown.Renderer = menu.Renderer;
         foreach (int pct in new[] { 0, 25, 50, 75, 100 })
         {
             int p = pct;
@@ -374,9 +394,11 @@ public sealed class TrayApplicationContext : ApplicationContext
             item.Click += (_, _) => SetBrightnessPercent(p);
             brightnessMenu.DropDownItems.Add(item);
         }
+        ApplyItemPadding(brightnessMenu.DropDownItems);
         menu.Items.Add(brightnessMenu);
 
-        var volumeMenu = new ToolStripMenuItem("🔊 Volume");
+        var volumeMenu = new ToolStripMenuItem("Volume", MenuGlyph(Glyph.Speaker));
+        volumeMenu.DropDown.Renderer = menu.Renderer;
         foreach (int pct in new[] { 0, 25, 50, 75, 100 })
         {
             int p = pct;
@@ -396,6 +418,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             }
         };
         volumeMenu.DropDownItems.Add(muteItem);
+        ApplyItemPadding(volumeMenu.DropDownItems);
         menu.Items.Add(volumeMenu);
 
         menu.Items.Add(new ToolStripSeparator());
@@ -432,12 +455,12 @@ public sealed class TrayApplicationContext : ApplicationContext
         menu.Items.Add(new ToolStripSeparator());
 
         // Info
-        var infoItem = new ToolStripMenuItem("ℹ️ Monitor Info...");
+        var infoItem = new ToolStripMenuItem("Monitor Info…", MenuGlyph(Glyph.Info));
         infoItem.Click += (_, _) => ShowSettingsInfo();
         menu.Items.Add(infoItem);
 
         // About
-        var aboutItem = new ToolStripMenuItem("About LumiDisplay");
+        var aboutItem = new ToolStripMenuItem("About LumiDisplay", MenuGlyph(Glyph.Monitor));
         aboutItem.Click += (_, _) => MessageBox.Show(
             "LumiDisplay v1.0\n\n" +
             "Intelligent external display & laptop brightness and audio control.\n" +
@@ -449,15 +472,14 @@ public sealed class TrayApplicationContext : ApplicationContext
             "  Volume keys: Monitor audio (when intercepted)\n\n" +
             "Controllers Supported:\n" +
             "  • DDC/CI (dxva2.dll) - VCP 0x10, 0x12, 0x62, 0x8D\n" +
-            "  • WMI (root\\wmi) - Built-in laptop panels\n\n" +
-            "Palette: Solar Gold / Electric Cyan / Radiant Violet / Neon Coral",
+            "  • WMI (root\\wmi) - Built-in laptop panels",
             "About LumiDisplay", MessageBoxButtons.OK, MessageBoxIcon.Information);
         menu.Items.Add(aboutItem);
 
         menu.Items.Add(new ToolStripSeparator());
 
         // Exit
-        var exitItem = new ToolStripMenuItem("Exit");
+        var exitItem = new ToolStripMenuItem("Exit", MenuGlyph(Glyph.Power));
         exitItem.Click += (_, _) =>
         {
             _trayIcon.Visible = false;
@@ -466,7 +488,19 @@ public sealed class TrayApplicationContext : ApplicationContext
         };
         menu.Items.Add(exitItem);
 
+        ApplyItemPadding(menu.Items);
         return menu;
+    }
+
+    private static Bitmap MenuGlyph(Glyph glyph) => Glyphs.ToBitmap(glyph, 32, Theme.TextMuted);
+
+    private static void ApplyItemPadding(ToolStripItemCollection items)
+    {
+        foreach (ToolStripItem item in items)
+        {
+            if (item is ToolStripMenuItem)
+                item.Padding = new Padding(2, 5, 2, 5);
+        }
     }
 
     private void ShowSettingsDialog()
@@ -577,7 +611,8 @@ public sealed class TrayApplicationContext : ApplicationContext
             string icoPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "lumidisplay.ico");
             if (System.IO.File.Exists(icoPath))
             {
-                return new Icon(icoPath);
+                // Ask for the small-icon size so the tray gets the crisp hand-tuned frame
+                return new Icon(icoPath, SystemInformation.SmallIconSize);
             }
         }
         catch { }
@@ -586,34 +621,8 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private static Icon CreateTrayIcon()
     {
-        // Programmatic fallback icon: LumiDisplay monitor with solar core and cyan flow
-        var bmp = new Bitmap(32, 32);
-        using var g = Graphics.FromImage(bmp);
-        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-
-        // Monitor outer bezel (Obsidian slate)
-        using var pen = new Pen(Color.FromArgb(90, 80, 115), 1.5f);
-        using var brush = new SolidBrush(Color.FromArgb(22, 20, 34));
-        g.FillRectangle(brush, 4, 3, 24, 18);
-        g.DrawRectangle(pen, 4, 3, 24, 18);
-
-        // Screen interior (Deep indigo-violet)
-        using var screenBrush = new SolidBrush(Color.FromArgb(40, 30, 65));
-        g.FillRectangle(screenBrush, 6, 5, 20, 14);
-
-        // Flow wave (Electric Cyan)
-        using var wavePen = new Pen(Color.FromArgb(6, 182, 212), 2f);
-        g.DrawBezier(wavePen, 6, 13, 11, 7, 21, 17, 26, 11);
-
-        // Solar Core (Solar Gold)
-        using var sunBrush = new SolidBrush(Color.FromArgb(245, 158, 11));
-        g.FillEllipse(sunBrush, 13, 8, 6, 6);
-
-        // Stand
-        g.DrawLine(pen, 16, 21, 16, 26);
-        using var basePen = new Pen(Color.FromArgb(6, 182, 212), 2f);
-        g.DrawLine(basePen, 10, 26, 22, 26);
-
+        // Programmatic fallback icon: same mark as lumidisplay.ico
+        using var bmp = Logo.ToBitmap(SystemInformation.SmallIconSize.Width);
         return Icon.FromHandle(bmp.GetHicon());
     }
 
@@ -676,69 +685,97 @@ internal sealed class HiddenHotkeyWindow : NativeWindow, IDisposable
 }
 
 /// <summary>
-/// Professional color table providing LumiDisplay's dark Obsidian slate palette.
+/// Professional color table providing LumiDisplay's light palette (white, soft gray, dark blue).
 /// </summary>
 internal sealed class LumiDisplayColorTable : ProfessionalColorTable
 {
-    private static readonly Color DarkBg = Color.FromArgb(20, 18, 30);
-    private static readonly Color DarkSurface = Color.FromArgb(28, 25, 42);
-    private static readonly Color HoverBg = Color.FromArgb(44, 38, 66);
-    private static readonly Color BorderCol = Color.FromArgb(62, 54, 88);
-    private static readonly Color AccentCyan = Color.FromArgb(6, 182, 212);
-
-    public override Color ToolStripDropDownBackground => DarkBg;
-    public override Color MenuBorder => BorderCol;
-    public override Color MenuItemBorder => BorderCol;
-    public override Color MenuItemSelected => HoverBg;
-    public override Color MenuItemSelectedGradientBegin => HoverBg;
-    public override Color MenuItemSelectedGradientEnd => HoverBg;
-    public override Color MenuItemPressedGradientBegin => HoverBg;
-    public override Color MenuItemPressedGradientEnd => HoverBg;
-    public override Color CheckBackground => DarkSurface;
-    public override Color CheckSelectedBackground => HoverBg;
-    public override Color CheckPressedBackground => HoverBg;
-    public override Color ImageMarginGradientBegin => DarkBg;
-    public override Color ImageMarginGradientMiddle => DarkBg;
-    public override Color ImageMarginGradientEnd => DarkBg;
-    public override Color SeparatorDark => BorderCol;
-    public override Color SeparatorLight => Color.Transparent;
+    public override Color ToolStripDropDownBackground => Theme.Surface;
+    public override Color MenuBorder => Theme.BorderStrong;
+    public override Color MenuItemBorder => Theme.AccentSoft;
+    public override Color MenuItemSelected => Theme.AccentSoft;
+    public override Color MenuItemSelectedGradientBegin => Theme.AccentSoft;
+    public override Color MenuItemSelectedGradientEnd => Theme.AccentSoft;
+    public override Color MenuItemPressedGradientBegin => Theme.AccentSoft;
+    public override Color MenuItemPressedGradientEnd => Theme.AccentSoft;
+    public override Color CheckBackground => Theme.Surface;
+    public override Color CheckSelectedBackground => Theme.AccentSoft;
+    public override Color CheckPressedBackground => Theme.AccentSoft;
+    public override Color ImageMarginGradientBegin => Theme.Surface;
+    public override Color ImageMarginGradientMiddle => Theme.Surface;
+    public override Color ImageMarginGradientEnd => Theme.Surface;
+    public override Color SeparatorDark => Theme.Border;
+    public override Color SeparatorLight => Theme.Surface;
 }
 
 /// <summary>
-/// Custom ToolStripProfessionalRenderer applying LumiDisplay styling to tray context menu.
+/// Custom ToolStripProfessionalRenderer applying LumiDisplay styling to tray context menu:
+/// rounded dark-blue-tinted hover pills, dark blue check marks and thin separators.
 /// </summary>
 internal sealed class LumiDisplayMenuRenderer : ToolStripProfessionalRenderer
 {
-    public LumiDisplayMenuRenderer() : base(new LumiDisplayColorTable()) { }
+    public LumiDisplayMenuRenderer() : base(new LumiDisplayColorTable())
+    {
+        RoundedEdges = false;
+    }
+
+    protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e)
+    {
+        if (!e.Item.Selected || !e.Item.Enabled) return;
+
+        var g = e.Graphics;
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        var rect = new RectangleF(3, 1, e.Item.Width - 6, e.Item.Height - 2);
+        using var path = Theme.RoundedRect(rect, 6);
+        using var brush = new SolidBrush(Theme.AccentSoft);
+        g.FillPath(brush, path);
+    }
 
     protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
     {
-        if (e.Item.Enabled)
-        {
-            e.TextColor = e.Item.Selected ? Color.FromArgb(6, 182, 212) : Color.FromArgb(235, 240, 250);
-        }
+        if (e.Item is ToolStripLabel)
+            e.TextColor = Theme.Accent;
+        else if (!e.Item.Enabled)
+            e.TextColor = Theme.TextFaint;
         else
-        {
-            e.TextColor = Color.FromArgb(120, 115, 140);
-        }
+            e.TextColor = e.Item.Selected ? Theme.Accent : Theme.Text;
         base.OnRenderItemText(e);
+    }
+
+    protected override void OnRenderArrow(ToolStripArrowRenderEventArgs e)
+    {
+        e.ArrowColor = e.Item?.Selected == true ? Theme.Accent : Theme.TextMuted;
+        base.OnRenderArrow(e);
+    }
+
+    protected override void OnRenderSeparator(ToolStripSeparatorRenderEventArgs e)
+    {
+        int y = e.Item.Height / 2;
+        using var pen = new Pen(Theme.Border, 1f);
+        e.Graphics.DrawLine(pen, 10, y, e.Item.Width - 10, y);
     }
 
     protected override void OnRenderItemCheck(ToolStripItemImageRenderEventArgs e)
     {
         var g = e.Graphics;
         var rect = e.ImageRectangle;
-        using var brush = new SolidBrush(Color.FromArgb(6, 182, 212));
-        using var pen = new Pen(Color.FromArgb(15, 23, 42), 2f);
-
         g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-        g.FillEllipse(brush, rect.X + 2, rect.Y + 2, rect.Width - 4, rect.Height - 4);
 
+        var box = new RectangleF(rect.X + 1, rect.Y + 1, rect.Width - 2, rect.Height - 2);
+        using (var path = Theme.RoundedRect(box, 4))
+        using (var brush = new SolidBrush(Theme.Accent))
+            g.FillPath(brush, path);
+
+        using var pen = new Pen(Color.White, Math.Max(1.6f, rect.Width / 9f))
+        {
+            StartCap = System.Drawing.Drawing2D.LineCap.Round,
+            EndCap = System.Drawing.Drawing2D.LineCap.Round,
+            LineJoin = System.Drawing.Drawing2D.LineJoin.Round
+        };
         g.DrawLines(pen, new[]
         {
-            new Point(rect.X + 5, rect.Y + rect.Height / 2),
-            new Point(rect.X + rect.Width / 2 - 1, rect.Y + rect.Height - 5),
-            new Point(rect.X + rect.Width - 5, rect.Y + 5)
+            new PointF(box.X + box.Width * 0.24f, box.Y + box.Height * 0.52f),
+            new PointF(box.X + box.Width * 0.43f, box.Y + box.Height * 0.70f),
+            new PointF(box.X + box.Width * 0.76f, box.Y + box.Height * 0.32f)
         });
     }
 }

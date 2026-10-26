@@ -29,7 +29,7 @@ On macOS, utilities like **BetterDisplay** provide an unmatched experience for s
 
 Windows historically lacked an equivalent, polished solution that unified external monitor speaker control, built-in laptop screen dimming, and hardware DDC brightness with an elegant macOS-inspired on-screen display.
 
-**LumiDisplay** bridges this gap: a lightweight, high-performance native Windows application built on .NET 8 WinForms and Win32 Interop, featuring an **Obsidian Dark** theme with dynamic multi-accent reactive glow.
+**LumiDisplay** bridges this gap: a lightweight, high-performance native Windows application built on .NET 8 WinForms and Win32 Interop, featuring a clean **light theme** — white and soft-gray surfaces with a **dark blue** accent.
 
 ---
 
@@ -46,23 +46,20 @@ Windows historically lacked an equivalent, polished solution that unified extern
   - `Ctrl + Alt + Up / Down`: Standard brightness adjustment (±1 chiclet / 6.25%).
   - `Ctrl + Alt + Shift + Up / Down`: Fine-scale brightness adjustment (±0.25 chiclet / 1.56%).
   - `Ctrl + Alt + Right / Left`: Contrast adjustment.
-- **macOS-Style 16-Chiclet Glass OSD**
-  - Translucent floating glass overlay rendered at the bottom-center of the screen.
-  - 16 chiclets with smooth opacity fade-out (~1.5s timeout).
-  - **Dynamic Multi-Accent Visual Feedback**:
-    - ☀️ **Solar Gold** (`#F59E0B`) — Brightness control
-    - 🌊 **Electric Cyan** (`#06B6D4`) — Volume control
-    - 🔴 **Neon Coral** (`#EF4444`) — Audio mute indicator
-    - 🔮 **Radiant Violet** (`#A855F7`) — Contrast control
-- **Modern Obsidian Dark UI & System Tray**
-  - Fully custom dark system tray context menu (`LumiDisplayMenuRenderer`).
+- **macOS-Style 16-Chiclet OSD**
+  - Floating white card with a soft drop shadow at the bottom-center of the screen, rendered with per-pixel alpha (`UpdateLayeredWindow`).
+  - 16 dark blue (`#1E3A8A`) chiclets, caption and percentage; a red speaker marks mute.
+  - Smooth fade-out after ~1.5s.
+- **Light Theme UI & System Tray**
+  - Palette: white `#FFFFFF`, soft gray `#F4F6FA` / `#E2E8F0`, dark blue accent `#1E3A8A` (see `Theme.cs`).
+  - Custom tray context menu (`LumiDisplayMenuRenderer`) with line icons and dark blue check marks.
   - Instant quick-presets (0%, 25%, 50%, 75%, 100%).
   - Synchronized multi-monitor control or individual display targeting.
   - Live hardware capability inspector.
-- **Immersive Dark Settings Window**
-  - Windows 11/10 Immersive Dark Titlebar (`DWMWA_USE_IMMERSIVE_DARK_MODE`).
-  - Configurable logical steps (total steps, standard chiclet step, fine step).
-  - Live adjustment test sliders for instant feedback.
+- **Settings Window**
+  - Sidebar navigation (General, Stepping & OSD, Hotkeys, Monitors & Test), white cards, toggle switches, key-cap shortcut list and live sliders.
+  - White Windows 11 caption bar; `Ctrl+Tab` / `Ctrl+1…4` switch pages, `Esc` closes.
+  - Configurable logical steps with a live 16-chiclet step preview.
   - Automatic startup on Windows login option via Registry (`HKCU\...\Run`).
 
 ---
@@ -75,7 +72,7 @@ Windows historically lacked an equivalent, polished solution that unified extern
 | **Built-in Laptop Panel** | Private `DisplayServicesSetBrightness` | `root\wmi: WmiMonitorBrightnessMethods.WmiSetBrightness` |
 | **Media Key Interception** | `CGEventTapCreate` (passive/active tap) | `SetWindowsHookEx(WH_KEYBOARD_LL)` |
 | **Custom Shortcuts** | Carbon `RegisterEventHotKey` | Win32 `RegisterHotKey` (user32.dll) |
-| **Visual Feedback** | `GlassOSD` / `AppOSD` (16 chiclets) | Layered WinForms translucent glass OSD (16 chiclets + multi-accent) |
+| **Visual Feedback** | `GlassOSD` / `AppOSD` (16 chiclets) | Per-pixel-alpha layered WinForms OSD (16 chiclets) |
 | **Stepping Calculation** | 64 total steps, 4 steps per chiclet | 64 total steps, 4 steps per chiclet (fully configurable) |
 | **Standard VCP Codes** | `0x10` (Bright), `0x12` (Contr), `0x62` (Vol), `0x8D` (Mute) | `0x10` (Bright), `0x12` (Contr), `0x62` (Vol), `0x8D` (Mute) |
 
@@ -124,18 +121,22 @@ dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=
 
 The resulting standalone executable will be generated at `publish/LumiDisplay.exe`.
 
+#### Developer flags
+- `LumiDisplay.exe --settings` opens the settings window right after launch.
+- `LumiDisplay.exe --export-icon lumidisplay.ico` regenerates the multi-resolution icon (16–256px) from the logo renderer in `Theme.cs`.
+
 ---
 
 ## 🎯 Usage
 
 1. Launch `LumiDisplay.exe`.
-2. The application will start minimized to the **System Tray** (monitor icon with Obsidian Slate bezel and Cyan wave).
+2. The application will start minimized to the **System Tray** (white monitor with a sun on a dark blue tile).
 3. Use your physical keyboard keys to adjust brightness, contrast, and audio volume.
 4. **Right-click the tray icon** to:
    - Apply instant percentage presets (0% to 100%).
    - Select specific target monitors or toggle synchronized multi-monitor control.
    - Inspect connected display capabilities and DDC/CI communication status.
-   - Open **⚙️ Preferences / Settings...**.
+   - Open **Settings…**.
 5. **Double-click the tray icon** to directly open the Settings dialog.
 
 ---
@@ -147,14 +148,17 @@ LumiDisplay/
 ├── .github/workflows/        # Automated CI/CD pipeline for GitHub Releases
 ├── LumiDisplay.csproj        # .NET 8 WinForms Windows project definition
 ├── Program.cs                # Entry point, DPI awareness & single-instance mutex
-├── TrayApplicationContext.cs # System tray context, dark renderer & orchestrator
+├── TrayApplicationContext.cs # System tray context, menu renderer & orchestrator
 ├── DdcMonitor.cs             # Low-level DDC/CI driver via dxva2.dll
 ├── WmiMonitor.cs             # WMI driver for built-in laptop panels
 ├── IMonitor.cs               # Display controller abstraction interface
 ├── MediaKeyInterceptor.cs    # Low-level WH_KEYBOARD_LL hook for media keys
 ├── HotkeyManager.cs          # Win32 global hotkey manager
-├── OsdOverlay.cs             # macOS Glass OSD overlay (16 chiclets + multi-accent)
-├── SettingsForm.cs           # Immersive Dark Mode settings dialog
+├── OsdOverlay.cs             # macOS-style OSD overlay (16 chiclets, per-pixel alpha)
+├── SettingsForm.cs           # Light theme settings window with sidebar navigation
+├── Theme.cs                  # Palette, line glyphs and the logo renderer
+├── ThemedControls.cs         # Toggle switch, slider, cards, key caps and other custom controls
+├── IconExporter.cs           # Writes lumidisplay.ico from the logo renderer
 ├── AppSettings.cs            # JSON configuration persistence model
 ├── StartupManager.cs         # Windows registry autostart manager
 ├── lumidisplay.ico           # Multi-resolution application icon
