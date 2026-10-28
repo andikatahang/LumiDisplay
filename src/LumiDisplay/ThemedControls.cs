@@ -159,6 +159,14 @@ internal sealed class RoundedButton : ThemedControl
         Font = new Font(Theme.FontFamilySemibold, 9.5f);
     }
 
+    protected override void OnEnabledChanged(EventArgs e)
+    {
+        Cursor = Enabled ? Cursors.Hand : Cursors.Default;
+        if (!Enabled) { _hover = false; _pressed = false; }
+        Invalidate();
+        base.OnEnabledChanged(e);
+    }
+
     protected override void OnMouseEnter(EventArgs e) { _hover = true; Invalidate(); base.OnMouseEnter(e); }
     protected override void OnMouseLeave(EventArgs e) { _hover = false; _pressed = false; Invalidate(); base.OnMouseLeave(e); }
     protected override void OnMouseDown(MouseEventArgs e) { _pressed = true; Invalidate(); base.OnMouseDown(e); }
@@ -186,7 +194,14 @@ internal sealed class RoundedButton : ThemedControl
         using var path = Theme.RoundedRect(rect, Px(8));
 
         Color fill, border, text;
-        if (Primary)
+        if (!Enabled)
+        {
+            // Disabled: flat soft gray, no hover/press feedback
+            fill = Primary ? Theme.Border : Theme.SurfaceAlt;
+            border = Primary ? Theme.Border : Theme.Border;
+            text = Theme.TextFaint;
+        }
+        else if (Primary)
         {
             fill = _pressed ? Theme.AccentPressed : _hover ? Theme.AccentHover : Theme.Accent;
             border = fill;

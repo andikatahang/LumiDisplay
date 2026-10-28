@@ -110,7 +110,107 @@ public sealed class SettingsForm : Form
 
         InitializeComponent();
         LoadSettings();
+        HookChangeTracking();
+        _savedState = CurrentState();
+        UpdateDirtyState();
         SelectPage(0);
+    }
+
+    // --- Unsaved-changes tracking ---
+
+    private RoundedButton _btnSave = null!;
+    private Label _lblSaveState = null!;
+    private readonly System.Windows.Forms.Timer _savedFlashTimer = new() { Interval = 2500 };
+    private string? _savedState;
+
+    private bool IsDirty => _savedState != null && CurrentState() != _savedState;
+
+    /// <summary>Everything Save writes, as one comparable string.</summary>
+    private string CurrentState()
+    {
+        var parts = new List<string>
+        {
+            $"{_chkStartup.Checked}|{_chkStartMinimized.Checked}|{_chkInterceptVolume.Checked}|{_chkForwardNative.Checked}",
+            $"{_numStepPercent.Value}|{_numFineStepPercent.Value}|{_chkSyncContrast.Checked}",
+            $"{_chkFineVolumeDefault.Checked}|{_chkFineVideoDefault.Checked}",
+            $"{_chkBrightnessHotkeys.Checked}|{_chkContrastHotkeys.Checked}|{_chkVolumeHotkeys.Checked}",
+            $"{_cboTargetMonitor.SelectedIndex}"
+        };
+        foreach (var (action, recorder) in _recorders)
+            parts.Add($"{action}={recorder.Modifiers}:{(int)recorder.Key}");
+        return string.Join(";", parts);
+    }
+
+    private void HookChangeTracking()
+    {
+        foreach (var toggle in new[]
+                 {
+                     _chkStartup, _chkStartMinimized, _chkInterceptVolume, _chkForwardNative, _chkSyncContrast,
+                     _chkFineVolumeDefault, _chkFineVideoDefault, _chkBrightnessHotkeys, _chkContrastHotkeys, _chkVolumeHotkeys
+                 })
+            toggle.CheckedChanged += (_, _) => UpdateDirtyState();
+
+        _numStepPercent.ValueChanged += (_, _) => UpdateDirtyState();
+        _numFineStepPercent.ValueChanged += (_, _) => UpdateDirtyState();
+        _cboTargetMonitor.SelectedIndexChanged += (_, _) => UpdateDirtyState();
+        foreach (var recorder in _recorders.Values)
+            recorder.BindingChanged += (_, _) => UpdateDirtyState();
+    }
+
+    private void UpdateDirtyState()
+    {
+        if (_savedState == null) return; // still loading
+        bool dirty = IsDirty;
+        _btnSave.Enabled = dirty;
+
+        if (dirty)
+        {
+            _savedFlashTimer.Stop();
+            _lblSaveState.Text = "Unsaved changes";
+            _lblSaveState.ForeColor = Theme.Accent;
+        }
+        else if (!_savedFlashTimer.Enabled)
+        {
+            _lblSaveState.Text = "";
+        }
+    }
+
+    /// <summary>Saves and stays open; the button disables again until the next change.</summary>
+    private bool SaveChanges()
+    {
+        if (!IsDirty) return true;
+        SaveSettings();
+        _savedState = CurrentState();
+
+        // Shortcuts another app owns show up red right away
+        var failed = _getFailedHotkeys?.Invoke() ?? Array.Empty<HotkeyManager.HotkeyAction>();
+        foreach (var (action, recorder) in _recorders)
+            recorder.Unavailable = failed.Contains(action);
+
+        _lblSaveState.Text = "✓ Changes saved";
+        _lblSaveState.ForeColor = Theme.Success;
+        _savedFlashTimer.Stop();
+        _savedFlashTimer.Start();
+        UpdateDirtyState();
+        return true;
+    }
+
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        if (e.CloseReason == CloseReason.UserClosing && IsDirty)
+        {
+            var answer = MessageBox.Show(this,
+                "You have unsaved changes. Save them before closing?",
+                "LumiDisplay", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+            if (answer == DialogResult.Cancel)
+            {
+                e.Cancel = true;
+                return;
+            }
+            if (answer == DialogResult.Yes)
+                SaveChanges();
+        }
+        base.OnFormClosing(e);
     }
 
     private readonly Func<IReadOnlyCollection<HotkeyManager.HotkeyAction>>? _getFailedHotkeys;
@@ -121,6 +221,7 @@ public sealed class SettingsForm : Form
     {
         // Never leave the global shortcuts paused if the window closes mid-recording
         _suspendHotkeys?.Invoke(false);
+        _savedFlashTimer.Dispose();
         base.OnFormClosed(e);
     }
 
@@ -298,36 +399,58 @@ public sealed class SettingsForm : Form
         {
             QuitRequested = true;
             Close();
+            if (!IsDisposed)
+            {
+                // The user chose to keep editing when asked about unsaved changes
+                QuitRequested = false;
+                return;
+            }
             _onQuit?.Invoke();
         };
 
-        var btnSave = new RoundedButton
+        // Enabled only while there are unsaved changes; saving keeps the window open
+        _btnSave = new RoundedButton
         {
             Text = "Save changes",
             Primary = true,
             Size = new Size(132, 38),
             Location = new Point(ContentWidth - CardMargin - 132, 15),
-            BackColor = Theme.Surface
+            BackColor = Theme.Surface,
+            Enabled = false
         };
-        btnSave.Click += (_, _) =>
-        {
-            SaveSettings();
-            Close();
-        };
+        _btnSave.Click += (_, _) => SaveChanges();
 
-        var btnCancel = new RoundedButton
+        // Closing with unsaved changes asks first (see OnFormClosing)
+        var btnClose = new RoundedButton
         {
-            Text = "Cancel",
+            Text = "Close",
             Size = new Size(100, 38),
             Location = new Point(ContentWidth - CardMargin - 132 - 10 - 100, 15),
             BackColor = Theme.Surface
         };
-        btnCancel.Click += (_, _) => Close();
+        btnClose.Click += (_, _) => Close();
+
+        _lblSaveState = new Label
+        {
+            AutoSize = false,
+            Size = new Size(150, 38),
+            Location = new Point(ContentWidth - CardMargin - 132 - 10 - 100 - 12 - 150, 15),
+            TextAlign = ContentAlignment.MiddleRight,
+            Font = new Font(Theme.FontFamily, 8.75F),
+            ForeColor = Theme.TextMuted,
+            BackColor = Theme.Surface
+        };
+        _savedFlashTimer.Tick += (_, _) =>
+        {
+            _savedFlashTimer.Stop();
+            UpdateDirtyState();
+        };
 
         if (_onQuit != null)
             footer.Controls.Add(btnQuit);
-        footer.Controls.Add(btnCancel);
-        footer.Controls.Add(btnSave);
+        footer.Controls.Add(_lblSaveState);
+        footer.Controls.Add(btnClose);
+        footer.Controls.Add(_btnSave);
         return footer;
     }
 
@@ -383,6 +506,12 @@ public sealed class SettingsForm : Form
         {
             SelectPage(e.KeyCode - Keys.D1);
             e.Handled = true;
+        }
+        else if (e.Control && e.KeyCode == Keys.S)
+        {
+            SaveChanges();
+            e.Handled = true;
+            e.SuppressKeyPress = true;
         }
         else if (e.KeyCode == Keys.Escape)
         {
@@ -473,7 +602,7 @@ public sealed class SettingsForm : Form
     {
         var answer = MessageBox.Show(this,
             "Reset all LumiDisplay settings and shortcuts to their defaults?\n\n" +
-            "You can still click Cancel afterwards to keep your current settings.",
+            "Nothing is applied until you click Save changes.",
             "Reset to defaults", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2);
         if (answer != DialogResult.Yes) return;
 
