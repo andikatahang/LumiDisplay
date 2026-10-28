@@ -63,6 +63,7 @@
 - **Menutup jendela:** LumiDisplay tetap berjalan di tray, jadi tombol-tombol tetap berfungsi.
 - **Keluar sepenuhnya:** klik **Quit LumiDisplay** di jendela, atau klik kanan ikon tray → **Quit LumiDisplay**.
 - **Klik kanan ikon tray** untuk preset kecerahan/volume (0–100%), memilih monitor yang dikontrol, dan melihat info monitor.
+- **Mulai dari awal:** **Settings → General → Reset all** mengembalikan semua pengaturan dan shortcut ke bawaan (berlaku setelah Anda klik **Save changes**).
 
 ## Tangkapan layar
 

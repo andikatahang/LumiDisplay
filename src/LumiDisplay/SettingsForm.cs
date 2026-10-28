@@ -448,6 +448,35 @@ public sealed class SettingsForm : Form
         ry = media.ContentTop;
         AddRow(media, new SettingRow("Intercept volume keys", "Volume Up, Down and Mute control monitors that have speakers.", _chkInterceptVolume), ref ry);
         AddRow(media, new SettingRow("Forward to system audio", "Let Windows handle the keys when sound isn't playing through a monitor.", _chkForwardNative), ref ry);
+
+        var btnResetAll = new RoundedButton
+        {
+            Text = "Reset all",
+            Size = new Size(110, 34),
+            BackColor = Theme.Surface
+        };
+        btnResetAll.Click += (_, _) => ResetAllToDefaults();
+        var reset = AddCard(page, "Reset", "", ref y, 60);
+        ry = reset.ContentTop;
+        AddRow(reset, new SettingRow("Reset to defaults",
+            "Restore every option and shortcut. Nothing changes until you save.", btnResetAll), ref ry);
+    }
+
+    /// <summary>
+    /// Puts every control back to the out-of-the-box values. Like any other edit in this window,
+    /// it only takes effect when the user clicks Save changes.
+    /// </summary>
+    private void ResetAllToDefaults()
+    {
+        var answer = MessageBox.Show(this,
+            "Reset all LumiDisplay settings and shortcuts to their defaults?\n\n" +
+            "You can still click Cancel afterwards to keep your current settings.",
+            "Reset to defaults", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2);
+        if (answer != DialogResult.Yes) return;
+
+        var defaults = new AppSettings();
+        ApplyToControls(defaults, defaults.StartWithWindows, Array.Empty<HotkeyManager.HotkeyAction>());
+        _cboTargetMonitor.SelectedIndex = 0;
     }
 
     private void BuildSteppingTab(Panel page)
@@ -719,30 +748,34 @@ public sealed class SettingsForm : Form
 
     private void LoadSettings()
     {
-        _chkStartup.Checked = StartupManager.IsStartupEnabled();
-        _chkStartMinimized.Checked = _settings.StartMinimized;
-        _chkInterceptVolume.Checked = _settings.InterceptMediaVolumeKeys;
-        _chkForwardNative.Checked = _settings.ForwardToNativeWhenSupported;
+        ApplyToControls(_settings, StartupManager.IsStartupEnabled(),
+            _getFailedHotkeys?.Invoke() ?? Array.Empty<HotkeyManager.HotkeyAction>());
+        PopulateMonitorsList();
+    }
 
-        _numTotalSteps.Value = Math.Clamp(_settings.TotalSteps, 16, 256);
-        _numStandardStep.Value = Math.Clamp(_settings.StandardStep, 1, 64);
-        _numFineStep.Value = Math.Clamp(_settings.FineStep, 1, 16);
-        _chkFineVolumeDefault.Checked = _settings.AudioMediaKeyFineControlByDefault;
-        _chkFineVideoDefault.Checked = _settings.VideoMediaKeyFineControlByDefault;
+    private void ApplyToControls(AppSettings s, bool startWithWindows, IReadOnlyCollection<HotkeyManager.HotkeyAction> failedHotkeys)
+    {
+        _chkStartup.Checked = startWithWindows;
+        _chkStartMinimized.Checked = s.StartMinimized;
+        _chkInterceptVolume.Checked = s.InterceptMediaVolumeKeys;
+        _chkForwardNative.Checked = s.ForwardToNativeWhenSupported;
 
-        _chkBrightnessHotkeys.Checked = _settings.EnableBrightnessHotkeys;
-        _chkContrastHotkeys.Checked = _settings.EnableContrastHotkeys;
-        _chkVolumeHotkeys.Checked = _settings.EnableVolumeHotkeys;
+        _numTotalSteps.Value = Math.Clamp(s.TotalSteps, 16, 256);
+        _numStandardStep.Value = Math.Clamp(s.StandardStep, 1, 64);
+        _numFineStep.Value = Math.Clamp(s.FineStep, 1, 16);
+        _chkFineVolumeDefault.Checked = s.AudioMediaKeyFineControlByDefault;
+        _chkFineVideoDefault.Checked = s.VideoMediaKeyFineControlByDefault;
 
-        var failed = _getFailedHotkeys?.Invoke() ?? Array.Empty<HotkeyManager.HotkeyAction>();
-        foreach (var (action, binding) in _settings.GetShortcutMap())
+        _chkBrightnessHotkeys.Checked = s.EnableBrightnessHotkeys;
+        _chkContrastHotkeys.Checked = s.EnableContrastHotkeys;
+        _chkVolumeHotkeys.Checked = s.EnableVolumeHotkeys;
+
+        foreach (var (action, binding) in s.GetShortcutMap())
         {
             if (!_recorders.TryGetValue(action, out var recorder)) continue;
             recorder.SetBinding(binding?.Modifiers ?? 0, binding?.Key ?? Keys.None);
-            recorder.Unavailable = failed.Contains(action);
+            recorder.Unavailable = failedHotkeys.Contains(action);
         }
-
-        PopulateMonitorsList();
     }
 
     private void PopulateMonitorsList()

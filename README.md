@@ -63,6 +63,7 @@
 - **Close the window:** LumiDisplay keeps running in the tray so your keys keep working.
 - **Quit completely:** click **Quit LumiDisplay** in the window, or right-click the tray icon → **Quit LumiDisplay**.
 - **Right-click the tray icon** for brightness/volume presets (0–100%), choosing which monitor to control, and monitor info.
+- **Start over:** **Settings → General → Reset all** restores every option and shortcut to its default (applied when you click **Save changes**).
 
 ## Screenshots
 
