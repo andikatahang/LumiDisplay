@@ -9,7 +9,7 @@
 <h1 align="center">LumiDisplay</h1>
 
 <p align="center">
-  Atur <b>kecerahan</b>, <b>kontras</b>, dan <b>volume speaker</b> monitor langsung dari keyboard di Windows,<br>
+  Atur <b>kecerahan</b> dan <b>kontras</b> monitor — juga <b>volume</b> — langsung dari keyboard di Windows,<br>
   lengkap dengan tampilan indikator di layar (OSD) bergaya macOS.
 </p>
 
@@ -32,7 +32,7 @@
 ## Fitur
 
 - **Kecerahan & kontras hardware** untuk monitor eksternal lewat DDC/CI, juga untuk layar laptop.
-- **Volume speaker monitor** — tombol volume dan mute di keyboard mengatur speaker bawaan monitor.
+- **Tombol volume dengan langkah rata** — volume dan mute mengubah volume Windows, jadi slider di taskbar selalu sesuai dengan yang terdengar. Level speaker hardware monitor sendiri bisa diatur di **Monitors & Test**.
 - **Shortcut keyboard** untuk kecerahan (langkah normal dan halus) serta kontras.
 - **Langkah rata 10%** untuk kecerahan, kontras, dan volume — setiap tekan berhenti di 10, 20, 30 … 100% (langkah halus 2% dengan Shift). Kedua ukuran bisa diatur.
 - **Sinkronkan kontras dengan kecerahan** (opsional) — kontras ikut berubah bersama kecerahan, sementara tombol kontras tetap bisa mengaturnya sendiri.
@@ -57,9 +57,9 @@
 | <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>↑</kbd> / <kbd>↓</kbd> | Naikkan / turunkan kecerahan |
 | <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>↑</kbd> / <kbd>↓</kbd> | Naikkan / turunkan kecerahan dengan langkah halus |
 | <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>→</kbd> / <kbd>←</kbd> | Naikkan / turunkan kontras |
-| <kbd>Volume +</kbd> / <kbd>Volume −</kbd> / <kbd>Mute</kbd> | Volume dan mute speaker monitor |
+| <kbd>Volume +</kbd> / <kbd>Volume −</kbd> / <kbd>Mute</kbd> | Volume Windows (langkah 10%) dan mute |
 
-**Atur shortcut sesuka Anda:** buka **Settings → Hotkeys**, klik sebuah shortcut, lalu tekan kombinasi tombol yang diinginkan. Semua shortcut kecerahan dan kontras bisa diganti, dan Anda bisa menambahkan tombol sendiri untuk menaikkan/menurunkan volume dan mute speaker monitor. Backspace menghapus shortcut, **Reset to defaults** mengembalikan shortcut bawaan di atas.
+**Atur shortcut sesuka Anda:** buka **Settings → Hotkeys**, klik sebuah shortcut, lalu tekan kombinasi tombol yang diinginkan. Semua shortcut kecerahan dan kontras bisa diganti, dan Anda bisa menambahkan tombol sendiri untuk menaikkan/menurunkan volume dan mute. Backspace menghapus shortcut, **Reset to defaults** mengembalikan shortcut bawaan di atas.
 
 - **Membuka jendela:** jalankan `LumiDisplay.exe` lagi, atau klik ikon di tray.
 - **Menutup jendela:** LumiDisplay tetap berjalan di tray, jadi tombol-tombol tetap berfungsi.
@@ -90,9 +90,11 @@
 </details>
 
 <details>
-<summary><b>Tombol volume masih mengubah volume Windows</b></summary>
+<summary><b>Bagaimana tombol volume bekerja?</b></summary>
 
-LumiDisplay hanya mengambil alih tombol volume kalau **Intercept volume keys** aktif *dan* monitor yang dipilih memiliki speaker yang terbaca lewat DDC/CI. Kalau **Forward to system audio** aktif (bawaan), tombol volume juga tetap dipegang Windows selama suara diputar lewat perangkat selain monitor, misalnya headphone atau speaker laptop.
+Kalau **Intercept volume keys** aktif, LumiDisplay mengubah **volume Windows** dengan langkah rata dan menampilkan indikatornya sendiri; slider di taskbar ikut bergerak. Kalau **Forward to system audio** aktif (bawaan), tombol volume diserahkan ke Windows selama suara diputar lewat perangkat selain monitor, misalnya headphone atau speaker laptop.
+
+Monitor yang punya speaker juga memiliki level **hardware** sendiri. Level ini bertumpuk dengan volume Windows (Windows 50% × monitor 50% terdengar seperti 25%), jadi atur sekali saja — biasanya tinggi — di **Monitors & Test → Speaker**, lalu pakai tombol volume seperti biasa.
 </details>
 
 <details>
@@ -149,7 +151,7 @@ Flag untuk developer:
 | Monitor eksternal | DDC/CI lewat `dxva2.dll` (`SetVCPFeature` / `GetVCPFeatureAndVCPFeatureReply`) — VCP `0x10` kecerahan, `0x12` kontras, `0x62` volume, `0x8D` mute. Setiap kontrol dites sekali per monitor; perintah diberi jeda ≥ 50 ms dan diulang hingga 3× | [`DdcMonitor.cs`](src/LumiDisplay/DdcMonitor.cs) |
 | Worker DDC/CI | Thread latar untuk semua perintah DDC/CI dari keyboard: hook keyboard dan UI tidak pernah menunggu monitor, dan tekanan tombol yang menumpuk digabung jadi satu perintah | [`DisplayWorker.cs`](src/LumiDisplay/DisplayWorker.cs) |
 | Layar laptop | WMI `root\wmi` — `WmiMonitorBrightness` / `WmiSetBrightness` | [`WmiMonitor.cs`](src/LumiDisplay/WmiMonitor.cs) |
-| Tombol volume | Hook keyboard tingkat rendah (`WH_KEYBOARD_LL`) | [`MediaKeyInterceptor.cs`](src/LumiDisplay/MediaKeyInterceptor.cs) |
+| Tombol volume | Hook keyboard tingkat rendah (`WH_KEYBOARD_LL`); volume Windows lewat Core Audio `IAudioEndpointVolume` pada perangkat audio bawaan | [`MediaKeyInterceptor.cs`](src/LumiDisplay/MediaKeyInterceptor.cs), [`AudioEndpoint.cs`](src/LumiDisplay/AudioEndpoint.cs) |
 | Shortcut | `RegisterHotKey` | [`HotkeyManager.cs`](src/LumiDisplay/HotkeyManager.cs) |
 | Indikator di layar | Layered window dengan alpha per piksel (`UpdateLayeredWindow`) | [`OsdOverlay.cs`](src/LumiDisplay/OsdOverlay.cs) |
 | Antarmuka | WinForms dengan kontrol yang digambar sendiri, tema terang | [`SettingsForm.cs`](src/LumiDisplay/SettingsForm.cs), [`ThemedControls.cs`](src/LumiDisplay/ThemedControls.cs), [`Theme.cs`](src/LumiDisplay/Theme.cs) |

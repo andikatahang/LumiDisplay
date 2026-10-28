@@ -79,7 +79,6 @@ public sealed class TrayApplicationContext : ApplicationContext
         // Enumerate monitors (both DDC/CI external and WMI built-in laptop panels) right away;
         // what each one supports is probed on the DDC/CI worker
         _monitors = EnumerateMonitors();
-        _speakerMonitors = new HashSet<IMonitor>(_monitors.FindAll(m => m.SupportsVolume));
         var initial = _monitors;
         _worker.Run(() => ProbeAndPublish(initial, replacing: null));
 
@@ -210,13 +209,7 @@ public sealed class TrayApplicationContext : ApplicationContext
                 ddc.ProbeCapabilities();
         }
 
-        // Remember which displays have a speaker, so the keyboard hook never has to ask over DDC/CI
-        var speakers = new HashSet<IMonitor>(list.FindAll(m => m.SupportsVolume));
-        _worker.InvokeOnUi(() =>
-        {
-            _monitors = list;
-            _speakerMonitors = speakers;
-        });
+        _worker.InvokeOnUi(() => _monitors = list);
 
         if (replacing != null && !ReferenceEquals(replacing, list))
         {
@@ -224,8 +217,6 @@ public sealed class TrayApplicationContext : ApplicationContext
                 m.Dispose();
         }
     }
-
-    private volatile HashSet<IMonitor> _speakerMonitors = new();
 
     private List<IMonitor> GetTargetMonitors()
     {
@@ -236,60 +227,83 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     // --- Media key handler ---
 
-    /// <summary>
-    /// Target monitors whose speaker LumiDisplay should drive for this key press,
-    /// or an empty list when Windows should handle the volume keys itself.
-    /// </summary>
-    private List<IMonitor> GetVolumeKeyTargets()
-    {
-        // Only monitors with a DDC/CI speaker; a laptop panel or speakerless monitor
-        // must never swallow the volume keys
-        var targets = GetTargetMonitors().FindAll(m => _speakerMonitors.Contains(m));
-        if (targets.Count == 0)
-            return targets;
-
-        // Sound is playing through headphones / laptop speakers: those keys belong to Windows
-        if (_settings.ForwardToNativeWhenSupported && !AudioEndpoint.DefaultOutputIsDisplay())
-            return new List<IMonitor>();
-
-        return targets;
-    }
+    // Volume keys, volume shortcuts and the tray Volume menu change the Windows volume of the
+    // default playback device, so the taskbar slider always matches what you hear. The monitor's
+    // own hardware speaker level (DDC/CI) is a separate stage, set in Settings → Monitors & Test.
 
     private bool OnMediaKey(MediaKeyInterceptor.MediaKeyAction action)
     {
-        var targets = GetVolumeKeyTargets();
-        if (targets.Count == 0)
-        {
-            // No monitor speaker to drive - let Windows handle the keys
+        // Sound is playing through headphones / laptop speakers: leave those keys to Windows
+        if (_settings.ForwardToNativeWhenSupported && !AudioEndpoint.DefaultOutputIsDisplay())
             return false;
-        }
 
         int step = _settings.AudioMediaKeyFineControlByDefault
             ? _settings.FineStepPercent
             : _settings.StepPercent;
 
-        switch (action)
+        return action switch
         {
-            case MediaKeyInterceptor.MediaKeyAction.VolumeUp:
-                AdjustAllVolume(targets, step, +1);
-                return true;
+            MediaKeyInterceptor.MediaKeyAction.VolumeUp => StepWindowsVolume(step, +1),
+            MediaKeyInterceptor.MediaKeyAction.VolumeDown => StepWindowsVolume(step, -1),
+            MediaKeyInterceptor.MediaKeyAction.VolumeMute => ToggleWindowsMute(),
+            _ => false
+        };
+    }
 
-            case MediaKeyInterceptor.MediaKeyAction.VolumeDown:
-                AdjustAllVolume(targets, step, -1);
-                return true;
+    /// <summary>One grid step of the Windows volume (60 → 70 → 80), with LumiDisplay's OSD.
+    /// Returns false (key goes to Windows) when there is no playback device to control.</summary>
+    private bool StepWindowsVolume(int stepPercent, int direction)
+    {
+        var current = AudioEndpoint.GetVolumePercent();
+        if (current == null) return false;
+        double next = DisplayControl.NextPercent(current.Value, stepPercent, direction);
+        AudioEndpoint.SetVolumePercent(next);
+        if (AudioEndpoint.GetMute() == true)
+            AudioEndpoint.SetMute(false); // like Windows: changing the volume unmutes
+        _osd.Show(OsdOverlay.OsdType.Volume, next / 100.0);
+        return true;
+    }
 
-            case MediaKeyInterceptor.MediaKeyAction.VolumeMute:
-                _worker.ToggleMute(targets);
-                return true;
-        }
+    private void SetWindowsVolumePercent(int percent)
+    {
+        if (!AudioEndpoint.SetVolumePercent(percent)) return;
+        if (AudioEndpoint.GetMute() == true)
+            AudioEndpoint.SetMute(false);
+        _osd.Show(OsdOverlay.OsdType.Volume, percent / 100.0);
+    }
 
-        return false;
+    private bool ToggleWindowsMute()
+    {
+        var muted = AudioEndpoint.GetMute();
+        if (muted == null) return false;
+        if (!AudioEndpoint.SetMute(!muted.Value)) return false;
+        if (muted.Value)
+            _osd.Show(OsdOverlay.OsdType.Volume, (AudioEndpoint.GetVolumePercent() ?? 0) / 100.0);
+        else
+            _osd.ShowMute(true);
+        return true;
     }
 
     // --- Hotkey handler ---
 
     private void OnHotkeyAction(HotkeyManager.HotkeyAction action)
     {
+        // Volume shortcuts change the Windows volume and follow the volume fine-scale setting;
+        // they work even when no monitor is connected
+        int volumeStep = _settings.StepPercent;
+        int volumeFineStep = _settings.FineStepPercent;
+        if (_settings.AudioMediaKeyFineControlByDefault)
+            (volumeStep, volumeFineStep) = (volumeFineStep, volumeStep);
+
+        switch (action)
+        {
+            case HotkeyManager.HotkeyAction.VolumeUp: StepWindowsVolume(volumeStep, +1); return;
+            case HotkeyManager.HotkeyAction.VolumeDown: StepWindowsVolume(volumeStep, -1); return;
+            case HotkeyManager.HotkeyAction.VolumeFineUp: StepWindowsVolume(volumeFineStep, +1); return;
+            case HotkeyManager.HotkeyAction.VolumeFineDown: StepWindowsVolume(volumeFineStep, -1); return;
+            case HotkeyManager.HotkeyAction.VolumeMute: ToggleWindowsMute(); return;
+        }
+
         var targets = GetTargetMonitors();
         if (targets.Count == 0) return;
 
@@ -302,13 +316,6 @@ public sealed class TrayApplicationContext : ApplicationContext
             // Swap: standard becomes fine, fine becomes standard
             (standardStep, fineStep) = (fineStep, standardStep);
         }
-
-        // Volume shortcuts follow the volume fine-scale setting and only drive monitors with a speaker
-        int volumeStep = _settings.StepPercent;
-        int volumeFineStep = _settings.FineStepPercent;
-        if (_settings.AudioMediaKeyFineControlByDefault)
-            (volumeStep, volumeFineStep) = (volumeFineStep, volumeStep);
-        var speakerTargets = targets.FindAll(m => _speakerMonitors.Contains(m));
 
         switch (action)
         {
@@ -324,21 +331,6 @@ public sealed class TrayApplicationContext : ApplicationContext
             case HotkeyManager.HotkeyAction.BrightnessFineDown:
                 AdjustAllBrightness(targets, fineStep, -1);
                 break;
-            case HotkeyManager.HotkeyAction.VolumeUp:
-                AdjustAllVolume(speakerTargets, volumeStep, +1);
-                break;
-            case HotkeyManager.HotkeyAction.VolumeDown:
-                AdjustAllVolume(speakerTargets, volumeStep, -1);
-                break;
-            case HotkeyManager.HotkeyAction.VolumeFineUp:
-                AdjustAllVolume(speakerTargets, volumeFineStep, +1);
-                break;
-            case HotkeyManager.HotkeyAction.VolumeFineDown:
-                AdjustAllVolume(speakerTargets, volumeFineStep, -1);
-                break;
-            case HotkeyManager.HotkeyAction.VolumeMute:
-                _worker.ToggleMute(speakerTargets);
-                break;
             case HotkeyManager.HotkeyAction.ContrastUp:
                 AdjustAllContrast(targets, _settings.StepPercent, +1);
                 break;
@@ -352,9 +344,6 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private void AdjustAllBrightness(List<IMonitor> targets, int stepPercent, int direction) =>
         _worker.Step(DisplayWorker.Control.Brightness, targets, stepPercent, direction, _settings.SyncContrastWithBrightness);
-
-    private void AdjustAllVolume(List<IMonitor> targets, int stepPercent, int direction) =>
-        _worker.Step(DisplayWorker.Control.Volume, targets, stepPercent, direction);
 
     // Manual contrast: never touches brightness, even when contrast follows brightness
     private void AdjustAllContrast(List<IMonitor> targets, int stepPercent, int direction) =>
@@ -470,12 +459,12 @@ public sealed class TrayApplicationContext : ApplicationContext
         {
             int p = pct;
             var item = new ToolStripMenuItem($"{p}%");
-            item.Click += (_, _) => SetVolumePercent(p);
+            item.Click += (_, _) => SetWindowsVolumePercent(p);
             volumeMenu.DropDownItems.Add(item);
         }
         volumeMenu.DropDownItems.Add(new ToolStripSeparator());
         var muteItem = new ToolStripMenuItem("Toggle Mute");
-        muteItem.Click += (_, _) => _worker.ToggleMute(GetTargetMonitors());
+        muteItem.Click += (_, _) => ToggleWindowsMute();
         volumeMenu.DropDownItems.Add(muteItem);
         ApplyItemPadding(volumeMenu.DropDownItems);
         menu.Items.Add(volumeMenu);
@@ -544,7 +533,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             "Native Windows equivalent of BetterDisplay's display controllers.\n\n" +
             "Keyboard Shortcuts:\n" +
             DescribeShortcuts() +
-            "  Volume keys: Monitor audio (when intercepted)\n\n" +
+            "  Volume keys: Windows volume in even steps (when intercepted)\n\n" +
             "Controllers Supported:\n" +
             "  • DDC/CI (dxva2.dll) - VCP 0x10, 0x12, 0x62, 0x8D\n" +
             "  • WMI (root\\wmi) - Built-in laptop panels",
@@ -645,8 +634,6 @@ public sealed class TrayApplicationContext : ApplicationContext
     private void SetBrightnessPercent(int percent) =>
         _worker.SetPercent(DisplayWorker.Control.Brightness, GetTargetMonitors(), percent, _settings.SyncContrastWithBrightness);
 
-    private void SetVolumePercent(int percent) =>
-        _worker.SetPercent(DisplayWorker.Control.Volume, GetTargetMonitors(), percent);
 
     private void ShowSettingsInfo()
     {
@@ -679,10 +666,10 @@ public sealed class TrayApplicationContext : ApplicationContext
 
                 var vol = m.GetVolume();
                 if (vol != null)
-                    info += $"  Volume: {vol.Value.current}/{vol.Value.max} " +
+                    info += $"  Speaker (hardware): {vol.Value.current}/{vol.Value.max} " +
                             $"({vol.Value.current * 100 / Math.Max(1, vol.Value.max)}%)\n";
                 else
-                    info += "  Volume: N/A (no DDC audio control)\n";
+                    info += "  Speaker (hardware): N/A (no DDC audio control)\n";
 
                 var mute = m.GetMute();
                 if (mute != null)
@@ -691,6 +678,10 @@ public sealed class TrayApplicationContext : ApplicationContext
                 info += "\n";
             }
         }
+
+        var winVolume = AudioEndpoint.GetVolumePercent();
+        info += $"Windows volume: {(winVolume.HasValue ? $"{Math.Round(winVolume.Value)}%" : "N/A")}" +
+                $"{(AudioEndpoint.GetMute() == true ? " (muted)" : "")}\n\n";
 
         info += $"Settings:\n" +
                 $"  Step: {_settings.StepPercent}%\n" +

@@ -9,7 +9,7 @@
 <h1 align="center">LumiDisplay</h1>
 
 <p align="center">
-  Control your monitor's <b>brightness</b>, <b>contrast</b> and <b>speaker volume</b> from the keyboard on Windows,<br>
+  Control your monitor's <b>brightness</b> and <b>contrast</b> — and the <b>volume</b> — from the keyboard on Windows,<br>
   with a clean macOS-style on-screen display.
 </p>
 
@@ -32,7 +32,7 @@
 ## Features
 
 - **Hardware brightness & contrast** for external monitors over DDC/CI, and for laptop screens.
-- **Monitor speaker volume** — your keyboard's volume and mute keys control the monitor's built-in speakers.
+- **Volume keys in even steps** — volume and mute change the Windows volume, so the taskbar slider always matches what you hear. The monitor's own hardware speaker level can be set in **Monitors & Test**.
 - **Keyboard shortcuts** for brightness (standard and fine steps) and contrast.
 - **Even 10% steps** for brightness, contrast and volume — every press lands on 10, 20, 30 … 100% (fine steps of 2% with Shift). Both sizes are adjustable.
 - **Sync contrast with brightness** (optional) — contrast moves along with brightness, while the contrast keys still adjust it on its own.
@@ -57,9 +57,9 @@
 | <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>↑</kbd> / <kbd>↓</kbd> | Brightness up / down |
 | <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>↑</kbd> / <kbd>↓</kbd> | Brightness up / down in fine steps |
 | <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>→</kbd> / <kbd>←</kbd> | Contrast up / down |
-| <kbd>Volume +</kbd> / <kbd>Volume −</kbd> / <kbd>Mute</kbd> | Monitor speaker volume and mute |
+| <kbd>Volume +</kbd> / <kbd>Volume −</kbd> / <kbd>Mute</kbd> | Windows volume (10% steps) and mute |
 
-**Make the shortcuts your own:** open **Settings → Hotkeys**, click a shortcut and press the keys you want. You can change every brightness and contrast shortcut, and add your own keys for monitor volume up/down and mute. Backspace clears a shortcut, **Reset to defaults** brings back the ones above.
+**Make the shortcuts your own:** open **Settings → Hotkeys**, click a shortcut and press the keys you want. You can change every brightness and contrast shortcut, and add your own keys for volume up/down and mute. Backspace clears a shortcut, **Reset to defaults** brings back the ones above.
 
 - **Open the window:** launch `LumiDisplay.exe` again, or click the tray icon.
 - **Close the window:** LumiDisplay keeps running in the tray so your keys keep working.
@@ -90,9 +90,11 @@
 </details>
 
 <details>
-<summary><b>Volume keys still change Windows volume</b></summary>
+<summary><b>How do the volume keys work?</b></summary>
 
-LumiDisplay only takes over the volume keys when **Intercept volume keys** is on *and* the selected monitor reports a speaker over DDC/CI. With **Forward to system audio** on (the default), the keys also stay with Windows whenever sound is playing through something other than a monitor, such as headphones or laptop speakers.
+With **Intercept volume keys** on, LumiDisplay changes the **Windows volume** in even steps and shows its own on-screen display; the taskbar slider moves with it. With **Forward to system audio** on (the default), the keys are left to Windows whenever sound plays through something other than a monitor, such as headphones or laptop speakers.
+
+Monitors with built-in speakers also have their own **hardware** level. It stacks with the Windows volume (Windows 50% × monitor 50% sounds like 25%), so set it once — usually high — under **Monitors & Test → Speaker** and use the volume keys from then on.
 </details>
 
 <details>
@@ -149,7 +151,7 @@ Developer flags:
 | External monitors | DDC/CI via `dxva2.dll` (`SetVCPFeature` / `GetVCPFeatureAndVCPFeatureReply`) — VCP `0x10` brightness, `0x12` contrast, `0x62` volume, `0x8D` mute. Each control is probed once per monitor; commands are spaced ≥ 50 ms and retried up to 3× | [`DdcMonitor.cs`](src/LumiDisplay/DdcMonitor.cs) |
 | DDC/CI worker | Background thread for all key-driven DDC/CI work: the keyboard hook and UI never wait on the monitor, and presses that pile up are merged into one command | [`DisplayWorker.cs`](src/LumiDisplay/DisplayWorker.cs) |
 | Laptop screens | WMI `root\wmi` — `WmiMonitorBrightness` / `WmiSetBrightness` | [`WmiMonitor.cs`](src/LumiDisplay/WmiMonitor.cs) |
-| Volume keys | Low-level keyboard hook (`WH_KEYBOARD_LL`) | [`MediaKeyInterceptor.cs`](src/LumiDisplay/MediaKeyInterceptor.cs) |
+| Volume keys | Low-level keyboard hook (`WH_KEYBOARD_LL`); Windows volume via Core Audio `IAudioEndpointVolume` on the default playback device | [`MediaKeyInterceptor.cs`](src/LumiDisplay/MediaKeyInterceptor.cs), [`AudioEndpoint.cs`](src/LumiDisplay/AudioEndpoint.cs) |
 | Shortcuts | `RegisterHotKey` | [`HotkeyManager.cs`](src/LumiDisplay/HotkeyManager.cs) |
 | On-screen display | Per-pixel-alpha layered window (`UpdateLayeredWindow`) | [`OsdOverlay.cs`](src/LumiDisplay/OsdOverlay.cs) |
 | UI | WinForms with custom-drawn controls, light theme | [`SettingsForm.cs`](src/LumiDisplay/SettingsForm.cs), [`ThemedControls.cs`](src/LumiDisplay/ThemedControls.cs), [`Theme.cs`](src/LumiDisplay/Theme.cs) |

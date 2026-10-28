@@ -576,9 +576,9 @@ public sealed class SettingsForm : Form
         AddRow(startup, new SettingRow("Stay in tray at sign-in", "When started with Windows, don't open this window.", _chkStartMinimized), ref ry);
 
         var media = AddCard(page, "Media keys",
-            "Route keyboard volume keys to monitor speakers over DDC/CI (VCP 0x62).", ref y, 2 * 60);
+            "Volume keys change the Windows volume, so the taskbar slider moves with them.", ref y, 2 * 60);
         ry = media.ContentTop;
-        AddRow(media, new SettingRow("Intercept volume keys", "Volume Up, Down and Mute control monitors that have speakers.", _chkInterceptVolume), ref ry);
+        AddRow(media, new SettingRow("Intercept volume keys", "Even 10% steps and LumiDisplay's on-screen display.", _chkInterceptVolume), ref ry);
         AddRow(media, new SettingRow("Forward to system audio", "Let Windows handle the keys when sound isn't playing through a monitor.", _chkForwardNative), ref ry);
 
         var btnResetAll = new RoundedButton
@@ -688,14 +688,14 @@ public sealed class SettingsForm : Form
         AddShortcutRow(bright, HotkeyManager.HotkeyAction.BrightnessFineUp, "A smaller step brighter.", ref ry);
         AddShortcutRow(bright, HotkeyManager.HotkeyAction.BrightnessFineDown, "A smaller step dimmer.", ref ry);
 
-        var volume = AddCard(page, "Volume", "Optional extra keys. Keyboard volume keys already work on their own.", ref y, 5 * 60);
+        var volume = AddCard(page, "Volume", "Optional extra keys for the Windows volume; the volume keys already work.", ref y, 5 * 60);
         volume.HeaderControl = _chkVolumeHotkeys;
         ry = volume.ContentTop;
-        AddShortcutRow(volume, HotkeyManager.HotkeyAction.VolumeUp, "Monitor speaker one step louder.", ref ry);
-        AddShortcutRow(volume, HotkeyManager.HotkeyAction.VolumeDown, "Monitor speaker one step quieter.", ref ry);
+        AddShortcutRow(volume, HotkeyManager.HotkeyAction.VolumeUp, "One step louder.", ref ry);
+        AddShortcutRow(volume, HotkeyManager.HotkeyAction.VolumeDown, "One step quieter.", ref ry);
         AddShortcutRow(volume, HotkeyManager.HotkeyAction.VolumeFineUp, "A smaller step louder.", ref ry);
         AddShortcutRow(volume, HotkeyManager.HotkeyAction.VolumeFineDown, "A smaller step quieter.", ref ry);
-        AddShortcutRow(volume, HotkeyManager.HotkeyAction.VolumeMute, "Toggle the monitor speaker on and off.", ref ry);
+        AddShortcutRow(volume, HotkeyManager.HotkeyAction.VolumeMute, "Mute or unmute the sound.", ref ry);
 
         var contrast = AddCard(page, "Contrast", "", ref y, 2 * 60);
         contrast.HeaderControl = _chkContrastHotkeys;
@@ -800,7 +800,7 @@ public sealed class SettingsForm : Form
         int tileY = target.ContentTop + 44;
         _tileType = new StatTile("Type") { Location = new Point(20, tileY), Width = tileW };
         _tileBrightness = new StatTile("Brightness") { Location = new Point(20 + (tileW + tileGap), tileY), Width = tileW };
-        _tileVolume = new StatTile("Volume") { Location = new Point(20 + (tileW + tileGap) * 2, tileY), Width = tileW };
+        _tileVolume = new StatTile("Speaker") { Location = new Point(20 + (tileW + tileGap) * 2, tileY), Width = tileW };
         _tileContrast = new StatTile("Contrast") { Location = new Point(20 + (tileW + tileGap) * 3, tileY), Width = tileW };
 
         target.Controls.Add(comboHost);
@@ -810,10 +810,10 @@ public sealed class SettingsForm : Form
         target.Controls.Add(_tileVolume);
         target.Controls.Add(_tileContrast);
 
-        var test = AddCard(page, "Live adjustment test", "Moves the selected display in real time.", ref y, 2 * 50 + 4);
+        var test = AddCard(page, "Live adjustment", "Brightness and the monitor's own speaker level (DDC/CI), in real time.", ref y, 2 * 50 + 4);
         int ry = test.ContentTop;
         (_tbTestBrightness, _lblTestBrightness) = AddSliderRow(test, Glyph.Sun, "Brightness", ref ry);
-        (_tbTestVolume, _lblTestVolume) = AddSliderRow(test, Glyph.Speaker, "Volume", ref ry);
+        (_tbTestVolume, _lblTestVolume) = AddSliderRow(test, Glyph.Speaker, "Speaker", ref ry);
 
         _tbTestBrightness.Scroll += (_, _) =>
         {
