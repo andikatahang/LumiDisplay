@@ -86,7 +86,7 @@
 
 - Nyalakan **DDC/CI** di menu bawaan monitor.
 - Gunakan kabel HDMI, DisplayPort, atau USB-C langsung dari GPU. Beberapa dock, KVM switch, dan adapter memblokir DDC/CI.
-- Buka halaman **Monitors & Test** di LumiDisplay: kalau kecerahan sebuah monitor tertulis *N/A*, berarti Windows tidak bisa berkomunikasi dengannya lewat DDC/CI.
+- Buka halaman **Monitors & Test** di LumiDisplay lalu pilih monitornya: *Not supported* berarti monitor tidak menjawab kontrol tersebut saat diperiksa LumiDisplay (kecerahan, kontras, dan volume dites sekali saat monitor tersambung), sedangkan *No reply* berarti monitor berhenti menjawab. Cabut-pasang kabelnya atau matikan-nyalakan DDC/CI di menu monitor, lalu tunggu ~10 detik sampai LumiDisplay mendeteksinya ulang.
 </details>
 
 <details>
@@ -146,7 +146,8 @@ Flag untuk developer:
 
 | Bagian | Implementasi | Source |
 |---|---|---|
-| Monitor eksternal | DDC/CI lewat `dxva2.dll` (`SetVCPFeature` / `GetVCPFeatureAndVCPFeatureReply`) — VCP `0x10` kecerahan, `0x12` kontras, `0x62` volume, `0x8D` mute | [`DdcMonitor.cs`](src/LumiDisplay/DdcMonitor.cs) |
+| Monitor eksternal | DDC/CI lewat `dxva2.dll` (`SetVCPFeature` / `GetVCPFeatureAndVCPFeatureReply`) — VCP `0x10` kecerahan, `0x12` kontras, `0x62` volume, `0x8D` mute. Setiap kontrol dites sekali per monitor; perintah diberi jeda ≥ 50 ms dan diulang hingga 3× | [`DdcMonitor.cs`](src/LumiDisplay/DdcMonitor.cs) |
+| Worker DDC/CI | Thread latar untuk semua perintah DDC/CI dari keyboard: hook keyboard dan UI tidak pernah menunggu monitor, dan tekanan tombol yang menumpuk digabung jadi satu perintah | [`DisplayWorker.cs`](src/LumiDisplay/DisplayWorker.cs) |
 | Layar laptop | WMI `root\wmi` — `WmiMonitorBrightness` / `WmiSetBrightness` | [`WmiMonitor.cs`](src/LumiDisplay/WmiMonitor.cs) |
 | Tombol volume | Hook keyboard tingkat rendah (`WH_KEYBOARD_LL`) | [`MediaKeyInterceptor.cs`](src/LumiDisplay/MediaKeyInterceptor.cs) |
 | Shortcut | `RegisterHotKey` | [`HotkeyManager.cs`](src/LumiDisplay/HotkeyManager.cs) |

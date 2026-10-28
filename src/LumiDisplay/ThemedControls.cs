@@ -962,7 +962,7 @@ internal sealed class StatTile : ThemedControl
             new Rectangle(PxI(12), PxI(10), Width - PxI(20), capFont.Height), Theme.TextMuted, flags);
         TextRenderer.DrawText(g, _value, valFont,
             new Rectangle(PxI(12), PxI(28), Width - PxI(20), valFont.Height + 2),
-            _value == "—" || _value == "N/A" ? Theme.TextFaint : Theme.Accent, flags);
+            _value is "—" or "N/A" or "Not supported" or "No reply" ? Theme.TextFaint : Theme.Accent, flags);
     }
 }
 

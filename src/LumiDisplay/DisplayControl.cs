@@ -35,13 +35,20 @@ internal static class DisplayControl
 
     public readonly record struct Change(double OldPercent, double NewPercent);
 
-    /// <summary>One step of a VCP-like value (brightness, contrast, volume). Null when unsupported or unchanged.</summary>
-    private static Change? Step(Func<(uint current, uint max)?> get, Func<uint, bool> set, double stepPercent, int direction)
+    /// <summary>
+    /// Moves a VCP-like value (brightness, contrast, volume) by |<paramref name="steps"/>| grid steps
+    /// in the sign's direction, with one read and one write. Several queued key presses arrive here
+    /// as one call. Null when unsupported.
+    /// </summary>
+    private static Change? Step(Func<(uint current, uint max)?> get, Func<uint, bool> set, double stepPercent, int steps)
     {
+        if (steps == 0) return null;
         var cur = get();
         if (cur == null || cur.Value.max == 0) return null;
         double oldPct = ToPercent(cur.Value.current, cur.Value.max);
-        double newPct = NextPercent(oldPct, stepPercent, direction);
+        double newPct = oldPct;
+        for (int i = 0; i < Math.Abs(steps); i++)
+            newPct = NextPercent(newPct, stepPercent, Math.Sign(steps));
         uint raw = ToRaw(newPct, cur.Value.max);
         if (raw == cur.Value.current) return new Change(oldPct, oldPct);
         return set(raw) ? new Change(oldPct, ToPercent(raw, cur.Value.max)) : null;
@@ -56,28 +63,35 @@ internal static class DisplayControl
         return set(raw) ? new Change(oldPct, ToPercent(raw, cur.Value.max)) : null;
     }
 
-    public static Change? StepBrightness(IMonitor m, double stepPercent, int direction, bool syncContrast)
+    // "steps" is signed: +1 = one step up, -3 = three steps down.
+
+    public static Change? StepBrightness(IMonitor m, double stepPercent, int steps, bool syncContrast)
     {
-        var change = Step(m.GetBrightness, m.SetBrightness, stepPercent, direction);
+        if (!m.SupportsBrightness) return null;
+        var change = Step(m.GetBrightness, m.SetBrightness, stepPercent, steps);
         if (change != null && syncContrast) FollowWithContrast(m, change.Value);
         return change;
     }
 
     public static Change? SetBrightnessPercent(IMonitor m, double percent, bool syncContrast)
     {
+        if (!m.SupportsBrightness) return null;
         var change = SetPercent(m.GetBrightness, m.SetBrightness, percent);
         if (change != null && syncContrast) FollowWithContrast(m, change.Value);
         return change;
     }
 
-    public static Change? StepContrast(IMonitor m, double stepPercent, int direction) =>
-        Step(m.GetContrast, m.SetContrast, stepPercent, direction);
+    public static Change? StepContrast(IMonitor m, double stepPercent, int steps) =>
+        m.SupportsContrast ? Step(m.GetContrast, m.SetContrast, stepPercent, steps) : null;
 
-    public static Change? StepVolume(IMonitor m, double stepPercent, int direction) =>
-        Step(m.GetVolume, m.SetVolume, stepPercent, direction);
+    public static Change? SetContrastPercent(IMonitor m, double percent) =>
+        m.SupportsContrast ? SetPercent(m.GetContrast, m.SetContrast, percent) : null;
+
+    public static Change? StepVolume(IMonitor m, double stepPercent, int steps) =>
+        m.SupportsVolume ? Step(m.GetVolume, m.SetVolume, stepPercent, steps) : null;
 
     public static Change? SetVolumePercent(IMonitor m, double percent) =>
-        SetPercent(m.GetVolume, m.SetVolume, percent);
+        m.SupportsVolume ? SetPercent(m.GetVolume, m.SetVolume, percent) : null;
 
     /// <summary>Moves contrast by the same number of percentage points brightness just moved.</summary>
     private static void FollowWithContrast(IMonitor m, Change brightness)

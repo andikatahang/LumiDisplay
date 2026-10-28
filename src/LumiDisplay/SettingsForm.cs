@@ -96,8 +96,10 @@ public sealed class SettingsForm : Form
         Action<OsdOverlay.OsdType, double> showOsd,
         Action? onQuit = null,
         Func<IReadOnlyCollection<HotkeyManager.HotkeyAction>>? getFailedHotkeys = null,
-        Action<bool>? suspendHotkeys = null)
+        Action<bool>? suspendHotkeys = null,
+        DisplayWorker? worker = null)
     {
+        _worker = worker;
         _settings = settings;
         _onSettingsChanged = onSettingsChanged;
         _getMonitors = getMonitors;
@@ -112,6 +114,7 @@ public sealed class SettingsForm : Form
     }
 
     private readonly Func<IReadOnlyCollection<HotkeyManager.HotkeyAction>>? _getFailedHotkeys;
+    private readonly DisplayWorker? _worker;
     private readonly Action<bool>? _suspendHotkeys;
 
     protected override void OnFormClosed(FormClosedEventArgs e)
@@ -826,14 +829,20 @@ public sealed class SettingsForm : Form
         }
 
         var m = monitors[sel - 1];
-        var bright = m.GetBrightness();
-        var vol = m.GetVolume();
-        var contrast = m.GetContrast();
+        // Controls the monitor didn't answer to when probed are skipped (no slow, retried reads)
+        var bright = m.SupportsBrightness ? m.GetBrightness() : null;
+        var vol = m.SupportsVolume ? m.GetVolume() : null;
+        var contrast = m.SupportsContrast ? m.GetContrast() : null;
+
+        static string Pct((uint current, uint max)? v, bool supported) =>
+            !supported ? "Not supported"
+            : v.HasValue ? $"{Math.Round(DisplayControl.ToPercent(v.Value.current, v.Value.max))}%"
+            : "No reply";
 
         _tileType.Value = m.IsBuiltIn ? "Built-in" : "DDC/CI";
-        _tileBrightness.Value = bright.HasValue ? $"{bright.Value.current * 100 / Math.Max(1, bright.Value.max)}%" : "N/A";
-        _tileVolume.Value = vol.HasValue ? $"{vol.Value.current * 100 / Math.Max(1, vol.Value.max)}%" : "N/A";
-        _tileContrast.Value = contrast.HasValue ? $"{contrast.Value.current}/{contrast.Value.max}" : "N/A";
+        _tileBrightness.Value = Pct(bright, m.SupportsBrightness);
+        _tileVolume.Value = Pct(vol, m.SupportsVolume);
+        _tileContrast.Value = Pct(contrast, m.SupportsContrast);
 
         if (bright.HasValue && bright.Value.max > 0)
         {
@@ -856,9 +865,13 @@ public sealed class SettingsForm : Form
             ? (IEnumerable<IMonitor>)monitors
             : new[] { monitors[sel - 1] };
 
-        // Uses the toggle as currently shown, so the sync can be tried before saving
-        foreach (var m in targets)
-            DisplayControl.SetBrightnessPercent(m, percent, _chkSyncContrast.Checked);
+        // Uses the toggle as currently shown, so the sync can be tried before saving.
+        // Through the worker a fast drag sends only the latest value instead of stalling the window.
+        if (_worker != null)
+            _worker.SetPercent(DisplayWorker.Control.Brightness, targets.ToList(), percent, _chkSyncContrast.Checked, showOsd: false);
+        else
+            foreach (var m in targets)
+                DisplayControl.SetBrightnessPercent(m, percent, _chkSyncContrast.Checked);
         _showOsd(OsdOverlay.OsdType.Brightness, percent / 100.0);
     }
 
@@ -871,8 +884,11 @@ public sealed class SettingsForm : Form
             ? (IEnumerable<IMonitor>)monitors
             : new[] { monitors[sel - 1] };
 
-        foreach (var m in targets)
-            DisplayControl.SetVolumePercent(m, percent);
+        if (_worker != null)
+            _worker.SetPercent(DisplayWorker.Control.Volume, targets.ToList(), percent, showOsd: false);
+        else
+            foreach (var m in targets)
+                DisplayControl.SetVolumePercent(m, percent);
         _showOsd(OsdOverlay.OsdType.Volume, percent / 100.0);
     }
 

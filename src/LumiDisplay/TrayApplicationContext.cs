@@ -43,19 +43,22 @@ public sealed class TrayApplicationContext : ApplicationContext
     private readonly AppSettings _settings;
     private SettingsForm? _settingsForm;
 
-    private List<IMonitor> _monitors = new();
+    // Replaced (never mutated) by RefreshMonitors, so the DDC/CI worker can read it safely
+    private volatile List<IMonitor> _monitors = new();
     private readonly System.Windows.Forms.Timer _monitorRefreshTimer;
     private readonly RegisteredWaitHandle? _showWindowWait;
+    private readonly DisplayWorker _worker;
 
     public TrayApplicationContext(bool openSettings = false, System.Threading.EventWaitHandle? showWindowEvent = null)
     {
         _settings = AppSettings.Load();
         _osd = new OsdOverlay { SegmentCount = OsdOverlay.SegmentsForStep(_settings.StepPercent) };
+        var ui = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
+        _worker = new DisplayWorker(ui, (type, fraction) => _osd.Show(type, fraction), muted => _osd.ShowMute(muted));
 
         // A second launch (desktop icon, Start menu) signals this event: open the window here
         if (showWindowEvent != null)
         {
-            var ui = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
             _showWindowWait = ThreadPool.RegisterWaitForSingleObject(showWindowEvent,
                 (_, _) => ui.Post(_ => ShowSettingsDialog(), null), null, Timeout.Infinite, false);
         }
@@ -73,8 +76,12 @@ public sealed class TrayApplicationContext : ApplicationContext
         _mediaKeyInterceptor.Enabled = _settings.InterceptMediaVolumeKeys;
         _mediaKeyInterceptor.Install();
 
-        // Enumerate monitors (both DDC/CI external and WMI built-in laptop panels)
-        RefreshMonitors();
+        // Enumerate monitors (both DDC/CI external and WMI built-in laptop panels) right away;
+        // what each one supports is probed on the DDC/CI worker
+        _monitors = EnumerateMonitors();
+        _speakerMonitors = new HashSet<IMonitor>(_monitors.FindAll(m => m.SupportsVolume));
+        var initial = _monitors;
+        _worker.Run(() => ProbeAndPublish(initial, replacing: null));
 
         // Refresh monitor list periodically (monitors can be connected/disconnected)
         _monitorRefreshTimer = new System.Windows.Forms.Timer { Interval = 10000 };
@@ -151,12 +158,8 @@ public sealed class TrayApplicationContext : ApplicationContext
             ToolTipIcon.Warning);
     }
 
-    private void RefreshMonitors()
+    private static List<IMonitor> EnumerateMonitors()
     {
-        // Dispose old monitors
-        foreach (var m in _monitors)
-            m.Dispose();
-
         var list = new List<IMonitor>();
 
         // 1. External monitors via DDC/CI (dxva2)
@@ -165,19 +168,64 @@ public sealed class TrayApplicationContext : ApplicationContext
         // 2. Built-in displays via WMI (laptops/tablets)
         list.AddRange(WmiMonitor.EnumerateMonitors());
 
-        // Remember which displays have a speaker, so the keyboard hook never has to ask over DDC/CI
-        var speakers = new HashSet<IMonitor>();
-        foreach (var m in list)
-        {
-            if (m.GetVolume() != null)
-                speakers.Add(m);
-        }
-
-        _monitors = list;
-        _speakerMonitors = speakers;
+        return list;
     }
 
-    private HashSet<IMonitor> _speakerMonitors = new();
+    /// <summary>
+    /// Re-enumerates displays on the DDC/CI worker. When the same displays are still connected the
+    /// current objects (and their probed capabilities) are kept, so nothing is re-probed every 10 s.
+    /// </summary>
+    private void RefreshMonitors() => _worker.Run(() =>
+    {
+        var fresh = EnumerateMonitors();
+        var current = _monitors;
+        if (SameMonitors(current, fresh))
+        {
+            foreach (var m in fresh) m.Dispose();
+            return;
+        }
+        ProbeAndPublish(fresh, replacing: current);
+    });
+
+    private static bool SameMonitors(List<IMonitor> a, List<IMonitor> b)
+    {
+        if (a.Count != b.Count) return false;
+        for (int i = 0; i < a.Count; i++)
+        {
+            if (a[i].GetType() != b[i].GetType() || a[i].Description != b[i].Description)
+                return false;
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Worker thread: finds out what each display supports, then makes the list current on the
+    /// UI thread and releases the displays it replaces.
+    /// </summary>
+    private void ProbeAndPublish(List<IMonitor> list, List<IMonitor>? replacing)
+    {
+        foreach (var m in list)
+        {
+            if (m is DdcMonitor ddc)
+                ddc.ProbeCapabilities();
+        }
+
+        // Remember which displays have a speaker, so the keyboard hook never has to ask over DDC/CI
+        var speakers = new HashSet<IMonitor>(list.FindAll(m => m.SupportsVolume));
+        _worker.InvokeOnUi(() =>
+        {
+            _monitors = list;
+            _speakerMonitors = speakers;
+        });
+
+        if (replacing != null && !ReferenceEquals(replacing, list))
+        {
+            foreach (var m in replacing)
+                m.Dispose();
+        }
+    }
+
+    private volatile HashSet<IMonitor> _speakerMonitors = new();
 
     private List<IMonitor> GetTargetMonitors()
     {
@@ -231,15 +279,7 @@ public sealed class TrayApplicationContext : ApplicationContext
                 return true;
 
             case MediaKeyInterceptor.MediaKeyAction.VolumeMute:
-                foreach (var m in targets)
-                {
-                    bool? wasMuted = m.GetMute();
-                    if (m.ToggleMute())
-                    {
-                        bool nowMuted = !(wasMuted ?? false);
-                        _osd.ShowMute(nowMuted);
-                    }
-                }
+                _worker.ToggleMute(targets);
                 return true;
         }
 
@@ -297,12 +337,7 @@ public sealed class TrayApplicationContext : ApplicationContext
                 AdjustAllVolume(speakerTargets, volumeFineStep, -1);
                 break;
             case HotkeyManager.HotkeyAction.VolumeMute:
-                foreach (var m in speakerTargets)
-                {
-                    bool? wasMuted = m.GetMute();
-                    if (m.ToggleMute())
-                        _osd.ShowMute(!(wasMuted ?? false));
-                }
+                _worker.ToggleMute(speakerTargets);
                 break;
             case HotkeyManager.HotkeyAction.ContrastUp:
                 AdjustAllContrast(targets, _settings.StepPercent, +1);
@@ -313,36 +348,17 @@ public sealed class TrayApplicationContext : ApplicationContext
         }
     }
 
-    private void AdjustAllBrightness(List<IMonitor> targets, int stepPercent, int direction)
-    {
-        foreach (var m in targets)
-        {
-            var change = DisplayControl.StepBrightness(m, stepPercent, direction, _settings.SyncContrastWithBrightness);
-            if (change != null)
-                _osd.Show(OsdOverlay.OsdType.Brightness, change.Value.NewPercent / 100.0);
-        }
-    }
+    // All three queue the DDC/CI work and return at once; the worker shows the OSD when done.
 
-    private void AdjustAllVolume(List<IMonitor> targets, int stepPercent, int direction)
-    {
-        foreach (var m in targets)
-        {
-            var change = DisplayControl.StepVolume(m, stepPercent, direction);
-            if (change != null)
-                _osd.Show(OsdOverlay.OsdType.Volume, change.Value.NewPercent / 100.0);
-        }
-    }
+    private void AdjustAllBrightness(List<IMonitor> targets, int stepPercent, int direction) =>
+        _worker.Step(DisplayWorker.Control.Brightness, targets, stepPercent, direction, _settings.SyncContrastWithBrightness);
+
+    private void AdjustAllVolume(List<IMonitor> targets, int stepPercent, int direction) =>
+        _worker.Step(DisplayWorker.Control.Volume, targets, stepPercent, direction);
 
     // Manual contrast: never touches brightness, even when contrast follows brightness
-    private void AdjustAllContrast(List<IMonitor> targets, int stepPercent, int direction)
-    {
-        foreach (var m in targets)
-        {
-            var change = DisplayControl.StepContrast(m, stepPercent, direction);
-            if (change != null)
-                _osd.Show(OsdOverlay.OsdType.Contrast, change.Value.NewPercent / 100.0);
-        }
-    }
+    private void AdjustAllContrast(List<IMonitor> targets, int stepPercent, int direction) =>
+        _worker.Step(DisplayWorker.Control.Contrast, targets, stepPercent, direction);
 
     // --- Hotkey window message relay ---
 
@@ -459,15 +475,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         }
         volumeMenu.DropDownItems.Add(new ToolStripSeparator());
         var muteItem = new ToolStripMenuItem("Toggle Mute");
-        muteItem.Click += (_, _) =>
-        {
-            foreach (var m in GetTargetMonitors())
-            {
-                bool? wasMuted = m.GetMute();
-                if (m.ToggleMute())
-                    _osd.ShowMute(!(wasMuted ?? false));
-            }
-        };
+        muteItem.Click += (_, _) => _worker.ToggleMute(GetTargetMonitors());
         volumeMenu.DropDownItems.Add(muteItem);
         ApplyItemPadding(volumeMenu.DropDownItems);
         menu.Items.Add(volumeMenu);
@@ -594,7 +602,8 @@ public sealed class TrayApplicationContext : ApplicationContext
                 showOsd: (type, frac) => _osd.Show(type, frac),
                 onQuit: ExitApplication,
                 getFailedHotkeys: () => _hotkeyFailures.AsReadOnly(),
-                suspendHotkeys: SetHotkeysSuspended);
+                suspendHotkeys: SetHotkeysSuspended,
+                worker: _worker);
             var form = _settingsForm;
             form.FormClosed += (_, _) =>
             {
@@ -633,25 +642,11 @@ public sealed class TrayApplicationContext : ApplicationContext
         Application.Exit();
     }
 
-    private void SetBrightnessPercent(int percent)
-    {
-        foreach (var m in GetTargetMonitors())
-        {
-            var change = DisplayControl.SetBrightnessPercent(m, percent, _settings.SyncContrastWithBrightness);
-            if (change != null)
-                _osd.Show(OsdOverlay.OsdType.Brightness, change.Value.NewPercent / 100.0);
-        }
-    }
+    private void SetBrightnessPercent(int percent) =>
+        _worker.SetPercent(DisplayWorker.Control.Brightness, GetTargetMonitors(), percent, _settings.SyncContrastWithBrightness);
 
-    private void SetVolumePercent(int percent)
-    {
-        foreach (var m in GetTargetMonitors())
-        {
-            var change = DisplayControl.SetVolumePercent(m, percent);
-            if (change != null)
-                _osd.Show(OsdOverlay.OsdType.Volume, change.Value.NewPercent / 100.0);
-        }
-    }
+    private void SetVolumePercent(int percent) =>
+        _worker.SetPercent(DisplayWorker.Control.Volume, GetTargetMonitors(), percent);
 
     private void ShowSettingsInfo()
     {
@@ -735,13 +730,14 @@ public sealed class TrayApplicationContext : ApplicationContext
         _monitorRefreshTimer.Dispose();
         _mediaKeyInterceptor.Dispose();
         _hotkeyManager.Dispose();
+        _worker.Dispose(); // finish the DDC/CI command in flight before the monitor handles go
         _osd.Dispose();
 
         _settingsForm?.Dispose();
 
         foreach (var m in _monitors)
             m.Dispose();
-        _monitors.Clear();
+        _monitors = new List<IMonitor>();
 
         _trayIcon.Dispose();
     }

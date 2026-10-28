@@ -24,16 +24,47 @@ public sealed class DdcMonitor : IMonitor
     public const uint MUTE_ON  = 1;
     public const uint MUTE_OFF = 2;
 
+    // DDC/CI timing: monitors need ~50 ms between commands (MCCS), and some miss commands
+    // occasionally, so every read/write is spaced and retried.
+    private const int CommandGapMs = 50;
+    private const int Attempts = 3;
+
     private readonly IntPtr _physicalMonitor;
     private readonly string _description;
+    private readonly object _io = new();
+    private long _lastCommandTimestamp;
     private bool _disposed;
+
+    // Filled by ProbeCapabilities(); until then every control is assumed to work.
+    private bool? _supportsBrightness, _supportsContrast, _supportsVolume;
 
     public string Description => _description;
     public IntPtr Handle => _physicalMonitor;
     public bool IsBuiltIn => false;
-    public bool SupportsBrightness => true;
-    public bool SupportsContrast => true;
-    public bool SupportsVolume => true;
+    public bool SupportsBrightness => _supportsBrightness ?? true;
+    public bool SupportsContrast => _supportsContrast ?? true;
+    public bool SupportsVolume => _supportsVolume ?? true;
+
+    /// <summary>
+    /// Finds out which controls this monitor really answers to by reading each VCP code once.
+    /// More reliable than the MCCS capabilities string, which many monitors fill in incompletely,
+    /// and much faster (one read each instead of a 1–2 s capabilities request).
+    /// </summary>
+    public void ProbeCapabilities()
+    {
+        _supportsBrightness = GetVcpValue(VCP_BRIGHTNESS) is { max: > 0 };
+        _supportsContrast = GetVcpValue(VCP_CONTRAST) is { max: > 0 };
+        _supportsVolume = GetVcpValue(VCP_VOLUME) is { max: > 0 };
+    }
+
+    /// <summary>Waits until the monitor is ready for the next command; caller holds _io.</summary>
+    private void WaitForBus()
+    {
+        if (_lastCommandTimestamp == 0) return;
+        double elapsed = System.Diagnostics.Stopwatch.GetElapsedTime(_lastCommandTimestamp).TotalMilliseconds;
+        if (elapsed < CommandGapMs)
+            System.Threading.Thread.Sleep((int)Math.Ceiling(CommandGapMs - elapsed));
+    }
 
     private DdcMonitor(IntPtr physicalMonitor, string description)
     {
@@ -74,15 +105,19 @@ public sealed class DdcMonitor : IMonitor
     /// </summary>
     public (uint current, uint max)? GetVcpValue(byte vcpCode)
     {
-        if (_disposed) throw new ObjectDisposedException(nameof(DdcMonitor));
-
-        if (NativeMethods.GetVCPFeatureAndVCPFeatureReply(
-                _physicalMonitor, vcpCode,
-                out _, out uint currentValue, out uint maxValue))
+        lock (_io)
         {
-            return (currentValue, maxValue);
+            for (int attempt = 0; attempt < Attempts; attempt++)
+            {
+                if (_disposed) throw new ObjectDisposedException(nameof(DdcMonitor));
+                WaitForBus();
+                bool ok = NativeMethods.GetVCPFeatureAndVCPFeatureReply(
+                    _physicalMonitor, vcpCode, out _, out uint currentValue, out uint maxValue);
+                _lastCommandTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
+                if (ok) return (currentValue, maxValue);
+            }
+            return null;
         }
-        return null;
     }
 
     /// <summary>
@@ -90,8 +125,18 @@ public sealed class DdcMonitor : IMonitor
     /// </summary>
     public bool SetVcpValue(byte vcpCode, uint value)
     {
-        if (_disposed) throw new ObjectDisposedException(nameof(DdcMonitor));
-        return NativeMethods.SetVCPFeature(_physicalMonitor, vcpCode, value);
+        lock (_io)
+        {
+            for (int attempt = 0; attempt < Attempts; attempt++)
+            {
+                if (_disposed) throw new ObjectDisposedException(nameof(DdcMonitor));
+                WaitForBus();
+                bool ok = NativeMethods.SetVCPFeature(_physicalMonitor, vcpCode, value);
+                _lastCommandTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
+                if (ok) return true;
+            }
+            return false;
+        }
     }
 
     // --- Convenience methods matching BetterDisplay's controls ---
@@ -133,14 +178,24 @@ public sealed class DdcMonitor : IMonitor
 
     private void Dispose(bool disposing)
     {
-        if (!_disposed)
+        if (_disposed) return;
+        if (disposing)
         {
-            _disposed = true;
-            if (_physicalMonitor != IntPtr.Zero)
-            {
-                NativeMethods.DestroyPhysicalMonitor(_physicalMonitor);
-            }
+            // Never destroy the handle while a DDC command on it is in flight
+            lock (_io) DestroyHandle();
         }
+        else
+        {
+            DestroyHandle();
+        }
+    }
+
+    private void DestroyHandle()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        if (_physicalMonitor != IntPtr.Zero)
+            NativeMethods.DestroyPhysicalMonitor(_physicalMonitor);
     }
 
     public override string ToString() => $"{_description} (0x{_physicalMonitor:X})";

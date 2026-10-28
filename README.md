@@ -86,7 +86,7 @@
 
 - Turn on **DDC/CI** in the monitor's on-screen menu.
 - Use HDMI, DisplayPort or USB-C directly from the GPU. Some docks, KVM switches and adapters block DDC/CI.
-- Open **Monitors & Test** in LumiDisplay: if a monitor shows *N/A* for brightness, Windows cannot talk to it over DDC/CI.
+- Open **Monitors & Test** in LumiDisplay and pick the monitor: *Not supported* means the monitor didn't answer that control when LumiDisplay checked it (brightness, contrast and volume are tested once when a monitor is connected), *No reply* means it stopped answering. Unplug and replug the cable, or toggle DDC/CI in the monitor menu, then wait ~10 seconds for LumiDisplay to re-detect it.
 </details>
 
 <details>
@@ -146,7 +146,8 @@ Developer flags:
 
 | Part | Implementation | Source |
 |---|---|---|
-| External monitors | DDC/CI via `dxva2.dll` (`SetVCPFeature` / `GetVCPFeatureAndVCPFeatureReply`) — VCP `0x10` brightness, `0x12` contrast, `0x62` volume, `0x8D` mute | [`DdcMonitor.cs`](src/LumiDisplay/DdcMonitor.cs) |
+| External monitors | DDC/CI via `dxva2.dll` (`SetVCPFeature` / `GetVCPFeatureAndVCPFeatureReply`) — VCP `0x10` brightness, `0x12` contrast, `0x62` volume, `0x8D` mute. Each control is probed once per monitor; commands are spaced ≥ 50 ms and retried up to 3× | [`DdcMonitor.cs`](src/LumiDisplay/DdcMonitor.cs) |
+| DDC/CI worker | Background thread for all key-driven DDC/CI work: the keyboard hook and UI never wait on the monitor, and presses that pile up are merged into one command | [`DisplayWorker.cs`](src/LumiDisplay/DisplayWorker.cs) |
 | Laptop screens | WMI `root\wmi` — `WmiMonitorBrightness` / `WmiSetBrightness` | [`WmiMonitor.cs`](src/LumiDisplay/WmiMonitor.cs) |
 | Volume keys | Low-level keyboard hook (`WH_KEYBOARD_LL`) | [`MediaKeyInterceptor.cs`](src/LumiDisplay/MediaKeyInterceptor.cs) |
 | Shortcuts | `RegisterHotKey` | [`HotkeyManager.cs`](src/LumiDisplay/HotkeyManager.cs) |
