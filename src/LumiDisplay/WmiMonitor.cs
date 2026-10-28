@@ -129,21 +129,6 @@ public sealed class WmiMonitor : IMonitor
         return false;
     }
 
-    public (uint newValue, uint maxValue)? AdjustBrightness(int logicalSteps, int totalLogicalSteps = 64)
-    {
-        var current = GetBrightness();
-        if (current == null) return null;
-
-        uint max = current.Value.max;
-        double stepSize = (double)max / totalLogicalSteps;
-        int newVal = (int)Math.Round(current.Value.current + logicalSteps * stepSize);
-        newVal = Math.Clamp(newVal, 0, (int)max);
-
-        if (SetBrightness((uint)newVal))
-            return ((uint)newVal, max);
-        return null;
-    }
-
     // Built-in displays do not support hardware contrast via WMI
     public (uint current, uint max)? GetContrast() => null;
     public bool SetContrast(uint value) => false;
@@ -154,7 +139,6 @@ public sealed class WmiMonitor : IMonitor
     public bool? GetMute() => null;
     public bool SetMute(bool muted) => false;
     public bool ToggleMute() => false;
-    public (uint newValue, uint maxValue)? AdjustVolume(int logicalSteps, int totalLogicalSteps = 64) => null;
 
     public void Dispose()
     {

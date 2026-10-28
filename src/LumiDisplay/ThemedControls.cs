@@ -717,7 +717,16 @@ internal sealed class SliderBar : ThemedControl
     public int Minimum { get; set; }
     public int Maximum { get; set; } = 100;
 
+    /// <summary>Values snap to multiples of this (e.g. 10 → 0, 10, 20 … 100).</summary>
+    public int Step { get; set; } = 1;
+
     public event EventHandler? Scroll;
+
+    private int Snap(int v)
+    {
+        int step = Math.Max(1, Step);
+        return Math.Clamp((int)Math.Round((double)v / step) * step, Minimum, Maximum);
+    }
 
     public SliderBar()
     {
@@ -746,7 +755,7 @@ internal sealed class SliderBar : ThemedControl
     private void SetFromX(int x)
     {
         float t = (x - TrackLeft) / Math.Max(1, TrackRight - TrackLeft);
-        int v = Minimum + (int)Math.Round(Math.Clamp(t, 0f, 1f) * (Maximum - Minimum));
+        int v = Snap(Minimum + (int)Math.Round(Math.Clamp(t, 0f, 1f) * (Maximum - Minimum)));
         if (v != _value)
         {
             Value = v;
@@ -790,12 +799,13 @@ internal sealed class SliderBar : ThemedControl
 
     protected override void OnKeyDown(KeyEventArgs e)
     {
+        int step = Math.Max(1, Step);
         int delta = e.KeyCode switch
         {
-            Keys.Left or Keys.Down => -1,
-            Keys.Right or Keys.Up => 1,
-            Keys.PageDown => -10,
-            Keys.PageUp => 10,
+            Keys.Left or Keys.Down => -step,
+            Keys.Right or Keys.Up => step,
+            Keys.PageDown => -2 * step,
+            Keys.PageUp => 2 * step,
             Keys.Home => Minimum - _value,
             Keys.End => Maximum - _value,
             _ => 0
@@ -803,7 +813,7 @@ internal sealed class SliderBar : ThemedControl
         if (delta != 0)
         {
             int before = _value;
-            Value = _value + delta;
+            Value = Snap(_value + delta);
             if (_value != before) Scroll?.Invoke(this, EventArgs.Empty);
             e.Handled = true;
         }
@@ -957,14 +967,13 @@ internal sealed class StatTile : ThemedControl
 }
 
 /// <summary>
-/// Visual preview of the stepping configuration: one OSD bar with the standard and fine
-/// step sizes highlighted, plus a one-line summary.
+/// Visual preview of the stepping configuration: the OSD bar as it will look (one segment per
+/// step, shown at 70%), the 0/50/100% marks and a one-line summary.
 /// </summary>
 internal sealed class StepPreview : ThemedControl
 {
-    private int _total = 64;
-    private int _standard = 4;
-    private int _fine = 1;
+    private int _step = 10;
+    private int _fine = 2;
 
     public StepPreview()
     {
@@ -973,11 +982,10 @@ internal sealed class StepPreview : ThemedControl
         Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
     }
 
-    public void SetSteps(int total, int standard, int fine)
+    public void SetSteps(int stepPercent, int fineStepPercent)
     {
-        _total = Math.Max(1, total);
-        _standard = standard;
-        _fine = fine;
+        _step = Math.Max(1, stepPercent);
+        _fine = Math.Max(1, fineStepPercent);
         Invalidate();
     }
 
@@ -994,34 +1002,42 @@ internal sealed class StepPreview : ThemedControl
             g.FillPath(fill, path);
         }
 
-        const int chiclets = 16;
+        int segments = OsdOverlay.SegmentsForStep(_step);
         float gap = Px(4);
         float barX = box.X + Px(16);
         float barW = box.Width - Px(32);
-        float cw = (barW - gap * (chiclets - 1)) / chiclets;
+        float cw = (barW - gap * (segments - 1)) / segments;
         float ch = Px(10);
-        float barY = box.Y + Px(16);
+        float barY = box.Y + Px(14);
 
-        double stdFrac = (double)_standard / _total;
-        double fineFrac = (double)_fine / _total;
-        for (int i = 0; i < chiclets; i++)
+        // Example level: the grid value nearest 70%
+        double examplePct = Math.Round(70.0 / _step) * _step;
+        double filled = Math.Clamp(examplePct, 0, 100) / 100.0 * segments;
+        for (int i = 0; i < segments; i++)
         {
-            double start = (double)i / chiclets;
-            Color c = start < stdFrac ? Theme.Accent
-                    : start < stdFrac + fineFrac ? Color.FromArgb(120, Theme.Accent)
-                    : Color.White;
+            double part = Math.Clamp(filled - i, 0, 1);
+            Color c = part >= 0.99 ? Theme.Accent : part > 0.01 ? Color.FromArgb(150, Theme.Accent) : Color.White;
             var r = new RectangleF(barX + i * (cw + gap), barY, cw, ch);
             using var p = Theme.RoundedRect(r, Px(3));
             using var b = new SolidBrush(c);
             g.FillPath(b, p);
         }
 
-        double stdPct = stdFrac * 100.0;
-        double finePct = fineFrac * 100.0;
-        string summary = $"Standard press  {stdPct:F2}%   ·   Fine press  {finePct:F2}%   ·   {_total} logical steps";
+        // 0 / 50 / 100% marks under the bar
+        using var markFont = new Font(Theme.FontFamily, 7.5f);
+        var markFlags = TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine;
+        int markY = (int)(barY + ch + Px(3));
+        TextRenderer.DrawText(g, "0%", markFont, new Point((int)barX, markY), Theme.TextMuted, markFlags);
+        var mid = TextRenderer.MeasureText(g, "50%", markFont, Size.Empty, markFlags);
+        TextRenderer.DrawText(g, "50%", markFont, new Point((int)(barX + barW / 2 - mid.Width / 2f), markY), Theme.TextMuted, markFlags);
+        var end = TextRenderer.MeasureText(g, "100%", markFont, Size.Empty, markFlags);
+        TextRenderer.DrawText(g, "100%", markFont, new Point((int)(barX + barW - end.Width), markY), Theme.TextMuted, markFlags);
+
+        double next1 = Math.Min(100, examplePct + _step), next2 = Math.Min(100, examplePct + 2 * _step);
+        string summary = $"Each press {_step}%  ({examplePct:0}% → {next1:0}% → {next2:0}%)   ·   Fine {_fine}%";
         using var font = new Font(Theme.FontFamily, 8.75f);
         TextRenderer.DrawText(g, summary, font,
-            new Rectangle((int)barX, (int)(barY + ch + Px(10)), (int)barW, font.Height + 4), Theme.Accent,
+            new Rectangle((int)barX, (int)(barY + ch + Px(20)), (int)barW, font.Height + 4), Theme.Accent,
             TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine);
     }
 }

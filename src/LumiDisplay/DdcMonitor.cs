@@ -120,50 +120,6 @@ public sealed class DdcMonitor : IMonitor
         return SetMute(!current.Value);
     }
 
-    /// <summary>
-    /// Adjust brightness by a signed step amount.
-    /// BetterDisplay uses 64 total steps (16 OSD chiclets × 4 steps per chiclet).
-    /// Standard step = 4 logical steps (one chiclet), fine step = 1 logical step.
-    /// The step is mapped proportionally to the monitor's actual max value.
-    /// </summary>
-    public (uint newValue, uint maxValue)? AdjustBrightness(int logicalSteps, int totalLogicalSteps = 64)
-    {
-        var current = GetBrightness();
-        if (current == null) return null;
-
-        uint max = current.Value.max;
-        if (max == 0) return null;
-
-        // Calculate step size proportional to max value, matching BetterDisplay's approach
-        double stepSize = (double)max / totalLogicalSteps;
-        int newVal = (int)Math.Round(current.Value.current + logicalSteps * stepSize);
-        newVal = Math.Clamp(newVal, 0, (int)max);
-
-        if (SetBrightness((uint)newVal))
-            return ((uint)newVal, max);
-        return null;
-    }
-
-    /// <summary>
-    /// Adjust volume by a signed step amount, same logic as brightness.
-    /// </summary>
-    public (uint newValue, uint maxValue)? AdjustVolume(int logicalSteps, int totalLogicalSteps = 64)
-    {
-        var current = GetVolume();
-        if (current == null) return null;
-
-        uint max = current.Value.max;
-        if (max == 0) return null;
-
-        double stepSize = (double)max / totalLogicalSteps;
-        int newVal = (int)Math.Round(current.Value.current + logicalSteps * stepSize);
-        newVal = Math.Clamp(newVal, 0, (int)max);
-
-        if (SetVolume((uint)newVal))
-            return ((uint)newVal, max);
-        return null;
-    }
-
     ~DdcMonitor()
     {
         Dispose(false);

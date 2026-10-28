@@ -34,7 +34,9 @@
 - **Hardware brightness & contrast** for external monitors over DDC/CI, and for laptop screens.
 - **Monitor speaker volume** — your keyboard's volume and mute keys control the monitor's built-in speakers.
 - **Keyboard shortcuts** for brightness (standard and fine steps) and contrast.
-- **On-screen display** with 16 steps, like macOS, so you always see the current level.
+- **Even 10% steps** for brightness, contrast and volume — every press lands on 10, 20, 30 … 100% (fine steps of 2% with Shift). Both sizes are adjustable.
+- **Sync contrast with brightness** (optional) — contrast moves along with brightness, while the contrast keys still adjust it on its own.
+- **On-screen display** in the macOS style, one segment per step, so you always see the current level.
 - **Lives in the system tray** — quick presets, per-monitor targeting, and it can start with Windows.
 - **Portable** — a single `.exe`, no installer, no .NET runtime to install.
 
@@ -152,7 +154,7 @@ Developer flags:
 | UI | WinForms with custom-drawn controls, light theme | [`SettingsForm.cs`](src/LumiDisplay/SettingsForm.cs), [`ThemedControls.cs`](src/LumiDisplay/ThemedControls.cs), [`Theme.cs`](src/LumiDisplay/Theme.cs) |
 | Settings | JSON in `%LocalAppData%\LumiDisplay\settings.json` | [`AppSettings.cs`](src/LumiDisplay/AppSettings.cs) |
 
-Stepping follows BetterDisplay on macOS: 64 logical steps, 4 per OSD chiclet (6.25% per press, 1.56% for fine steps).
+Stepping ([`DisplayControl.cs`](src/LumiDisplay/DisplayControl.cs)) works in percent on a grid: each press moves to the next multiple of the step (10% by default, 2% fine), so a value set elsewhere (say 63%) snaps to 70% going up or 60% going down. With *Sync contrast with brightness* on, contrast moves by the same number of points as brightness (never below 10% while syncing). This replaces BetterDisplay's 64-logical-step model, whose 6.25% steps gave uneven percentages.
 </details>
 
 ## License

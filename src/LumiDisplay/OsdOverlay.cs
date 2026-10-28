@@ -19,7 +19,8 @@ namespace LumiDisplay;
 ///   - Auto-dismisses after ~1.5 seconds
 ///   - Appears at bottom-center of screen
 ///
-/// LumiDisplay renders it as a white card with a soft drop shadow and dark blue chiclets,
+/// LumiDisplay shows one segment per step instead (10 segments at the default 10% step), and
+/// renders it as a white card with a soft drop shadow and dark blue segments,
 /// pushed to a per-pixel-alpha layered window (UpdateLayeredWindow) so the rounded
 /// corners and shadow blend cleanly with whatever is behind them.
 /// </summary>
@@ -37,8 +38,15 @@ public sealed class OsdOverlay : IDisposable
     private readonly System.Windows.Forms.Timer _hideTimer;
     private bool _disposed;
 
-    // BetterDisplay uses 16 chiclets in its OSD
-    private const int CHICLET_COUNT = 16;
+    /// <summary>
+    /// Number of bar segments: one per step (10 at the default 10% step), so each key press
+    /// fills or empties exactly one segment. BetterDisplay's fixed 16 chiclets didn't line up
+    /// with 10% steps.
+    /// </summary>
+    public int SegmentCount { get; set; } = 10;
+
+    public static int SegmentsForStep(int stepPercent) =>
+        Math.Clamp((int)Math.Round(100.0 / Math.Max(1, stepPercent)), 5, 25);
 
     public OsdOverlay()
     {
@@ -59,6 +67,7 @@ public sealed class OsdOverlay : IDisposable
         fraction = Math.Clamp(fraction, 0.0, 1.0);
 
         _hideTimer.Stop();
+        _form.Segments = SegmentCount;
         _form.SetContent(type, fraction, false);
         _form.ShowOsd();
         _hideTimer.Start();
@@ -70,6 +79,7 @@ public sealed class OsdOverlay : IDisposable
     public void ShowMute(bool muted)
     {
         _hideTimer.Stop();
+        _form.Segments = SegmentCount;
         _form.SetContent(OsdType.Mute, muted ? 0.0 : 1.0, muted);
         _form.ShowOsd();
         _hideTimer.Start();
@@ -92,6 +102,8 @@ public sealed class OsdOverlay : IDisposable
     /// </summary>
     private sealed class OsdForm : Form
     {
+        public int Segments { get; set; } = 10;
+
         private OsdType _type;
         private double _fraction;
         private bool _muted;
@@ -307,17 +319,32 @@ public sealed class OsdOverlay : IDisposable
             // Chiclet bar
             float barY = card.Bottom - 17 * s - chicletH;
             float barW = rightX - textX;
-            float chicletW = (barW - chicletGap * (CHICLET_COUNT - 1)) / CHICLET_COUNT;
+            int segments = Math.Max(1, Segments);
+            float chicletW = (barW - chicletGap * (segments - 1)) / segments;
 
-            int filledChiclets = (int)Math.Round(_fraction * CHICLET_COUNT);
-            if (_muted) filledChiclets = 0;
+            // Filled amount in segments; a fine step leaves the last segment partly filled
+            double filled = _muted ? 0 : _fraction * segments;
 
-            for (int i = 0; i < CHICLET_COUNT; i++)
+            for (int i = 0; i < segments; i++)
             {
                 var chicletRect = new RectangleF(textX + i * (chicletW + chicletGap), barY, chicletW, chicletH);
-                using var chicletBrush = new SolidBrush(i < filledChiclets ? Theme.Accent : Theme.Border);
                 using var chicletPath = Theme.RoundedRect(chicletRect, 2.5f * s);
-                g.FillPath(chicletBrush, chicletPath);
+                using (var empty = new SolidBrush(Theme.Border))
+                    g.FillPath(empty, chicletPath);
+
+                double part = Math.Clamp(filled - i, 0, 1);
+                if (part <= 0.01) continue;
+                using var fill = new SolidBrush(Theme.Accent);
+                if (part >= 0.99)
+                {
+                    g.FillPath(fill, chicletPath);
+                }
+                else
+                {
+                    g.SetClip(new RectangleF(chicletRect.X, chicletRect.Y, (float)(chicletRect.Width * part), chicletRect.Height));
+                    g.FillPath(fill, chicletPath);
+                    g.ResetClip();
+                }
             }
         }
 

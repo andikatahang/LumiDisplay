@@ -65,9 +65,9 @@ public sealed class SettingsForm : Form
     private ToggleSwitch _chkForwardNative = null!;
 
     // Controls - Stepping
-    private NumericUpDown _numTotalSteps = null!;
-    private NumericUpDown _numStandardStep = null!;
-    private NumericUpDown _numFineStep = null!;
+    private NumericUpDown _numStepPercent = null!;
+    private NumericUpDown _numFineStepPercent = null!;
+    private ToggleSwitch _chkSyncContrast = null!;
     private ToggleSwitch _chkFineVolumeDefault = null!;
     private ToggleSwitch _chkFineVideoDefault = null!;
     private StepPreview _stepPreview = null!;
@@ -481,23 +481,27 @@ public sealed class SettingsForm : Form
 
     private void BuildSteppingTab(Panel page)
     {
-        _numTotalSteps = CreateNumber(16, 256, 64);
-        _numStandardStep = CreateNumber(1, 64, 4);
-        _numFineStep = CreateNumber(1, 16, 1);
-        _numTotalSteps.ValueChanged += (_, _) => UpdateStepSummary();
-        _numStandardStep.ValueChanged += (_, _) => UpdateStepSummary();
-        _numFineStep.ValueChanged += (_, _) => UpdateStepSummary();
+        _numStepPercent = CreateNumber(1, 50, 10);
+        _numFineStepPercent = CreateNumber(1, 10, 2);
+        _numStepPercent.ValueChanged += (_, _) => UpdateStepSummary();
+        _numFineStepPercent.ValueChanged += (_, _) => UpdateStepSummary();
         _chkFineVolumeDefault = new ToggleSwitch();
         _chkFineVideoDefault = new ToggleSwitch();
+        _chkSyncContrast = new ToggleSwitch();
         _stepPreview = new StepPreview();
 
         int y = 4;
-        var steps = AddCard(page, "Step sizes", "16 OSD chiclets, 4 logical steps each by default.", ref y, 3 * 60 + 92);
+        var steps = AddCard(page, "Step size",
+            "Brightness, contrast and volume move in even steps that snap to the grid.", ref y, 2 * 60 + 92);
         int ry = steps.ContentTop;
-        AddRow(steps, new SettingRow("Total logical steps", "Resolution of the full 0–100% range.", _numTotalSteps), ref ry);
-        AddRow(steps, new SettingRow("Standard step", "Logical steps per normal key press.", _numStandardStep), ref ry);
-        AddRow(steps, new SettingRow("Fine step", "Logical steps per press with Shift held.", _numFineStep), ref ry);
+        AddRow(steps, new SettingRow("Step (%)", "Each key press, e.g. 60% → 70% → 80%.", _numStepPercent), ref ry);
+        AddRow(steps, new SettingRow("Fine step (%)", "With Shift held, or the fine shortcuts.", _numFineStepPercent), ref ry);
         AddRow(steps, _stepPreview, ref ry);
+
+        var link = AddCard(page, "Brightness & contrast", "", ref y, 60);
+        ry = link.ContentTop;
+        AddRow(link, new SettingRow("Sync contrast with brightness",
+            "Contrast moves along with brightness. Contrast keys still work on their own.", _chkSyncContrast), ref ry);
 
         var fine = AddCard(page, "Fine scale by default", "", ref y, 2 * 60);
         ry = fine.ContentTop;
@@ -509,7 +513,11 @@ public sealed class SettingsForm : Form
 
     private void UpdateStepSummary()
     {
-        _stepPreview.SetSteps((int)_numTotalSteps.Value, (int)_numStandardStep.Value, (int)_numFineStep.Value);
+        int step = (int)_numStepPercent.Value;
+        _stepPreview.SetSteps(step, (int)_numFineStepPercent.Value);
+        // The live test sliders follow the same grid
+        if (_tbTestBrightness != null) _tbTestBrightness.Step = step;
+        if (_tbTestVolume != null) _tbTestVolume.Step = step;
     }
 
     private void BuildHotkeysTab(Panel page)
@@ -760,9 +768,10 @@ public sealed class SettingsForm : Form
         _chkInterceptVolume.Checked = s.InterceptMediaVolumeKeys;
         _chkForwardNative.Checked = s.ForwardToNativeWhenSupported;
 
-        _numTotalSteps.Value = Math.Clamp(s.TotalSteps, 16, 256);
-        _numStandardStep.Value = Math.Clamp(s.StandardStep, 1, 64);
-        _numFineStep.Value = Math.Clamp(s.FineStep, 1, 16);
+        _numStepPercent.Value = Math.Clamp(s.StepPercent, 1, 50);
+        _numFineStepPercent.Value = Math.Clamp(s.FineStepPercent, 1, 10);
+        _chkSyncContrast.Checked = s.SyncContrastWithBrightness;
+        UpdateStepSummary();
         _chkFineVolumeDefault.Checked = s.AudioMediaKeyFineControlByDefault;
         _chkFineVideoDefault.Checked = s.VideoMediaKeyFineControlByDefault;
 
@@ -847,15 +856,9 @@ public sealed class SettingsForm : Form
             ? (IEnumerable<IMonitor>)monitors
             : new[] { monitors[sel - 1] };
 
+        // Uses the toggle as currently shown, so the sync can be tried before saving
         foreach (var m in targets)
-        {
-            var cur = m.GetBrightness();
-            if (cur.HasValue)
-            {
-                uint val = (uint)(cur.Value.max * percent / 100);
-                m.SetBrightness(val);
-            }
-        }
+            DisplayControl.SetBrightnessPercent(m, percent, _chkSyncContrast.Checked);
         _showOsd(OsdOverlay.OsdType.Brightness, percent / 100.0);
     }
 
@@ -869,14 +872,7 @@ public sealed class SettingsForm : Form
             : new[] { monitors[sel - 1] };
 
         foreach (var m in targets)
-        {
-            var cur = m.GetVolume();
-            if (cur.HasValue)
-            {
-                uint val = (uint)(cur.Value.max * percent / 100);
-                m.SetVolume(val);
-            }
-        }
+            DisplayControl.SetVolumePercent(m, percent);
         _showOsd(OsdOverlay.OsdType.Volume, percent / 100.0);
     }
 
@@ -893,9 +889,9 @@ public sealed class SettingsForm : Form
         _settings.InterceptMediaVolumeKeys = _chkInterceptVolume.Checked;
         _settings.ForwardToNativeWhenSupported = _chkForwardNative.Checked;
 
-        _settings.TotalSteps = (int)_numTotalSteps.Value;
-        _settings.StandardStep = (int)_numStandardStep.Value;
-        _settings.FineStep = (int)_numFineStep.Value;
+        _settings.StepPercent = (int)_numStepPercent.Value;
+        _settings.FineStepPercent = (int)_numFineStepPercent.Value;
+        _settings.SyncContrastWithBrightness = _chkSyncContrast.Checked;
         _settings.AudioMediaKeyFineControlByDefault = _chkFineVolumeDefault.Checked;
         _settings.VideoMediaKeyFineControlByDefault = _chkFineVideoDefault.Checked;
 

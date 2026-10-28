@@ -47,6 +47,5 @@ public interface IMonitor : IDisposable
     bool SetMute(bool muted);
     bool ToggleMute();
 
-    (uint newValue, uint maxValue)? AdjustBrightness(int logicalSteps, int totalLogicalSteps = 64);
-    (uint newValue, uint maxValue)? AdjustVolume(int logicalSteps, int totalLogicalSteps = 64);
+    // Stepping (10% grid, contrast sync) lives in DisplayControl, on top of Get/Set above.
 }

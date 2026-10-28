@@ -50,7 +50,7 @@ public sealed class HotkeyManager : IDisposable
     /// <summary>
     /// Default hotkey bindings matching BetterDisplay's typical configuration.
     /// BetterDisplay uses:
-    ///   - Standard step: one OSD chiclet worth (4 logical steps of 64 total)
+    ///   - Standard step: one OSD chiclet worth (LumiDisplay: 10%, see AppSettings.StepPercent)
     ///   - Fine step: Shift+Option modifier for 1 logical step
     /// 
     /// Windows equivalents:

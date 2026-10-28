@@ -29,9 +29,9 @@ namespace LumiDisplay;
 ///   0x8D = Audio Mute
 ///
 /// Step sizes (from BetterDisplay's keyboardSteps configuration):
-///   Total range: 64 logical steps (configurable)
-///   Standard step: 4 logical steps = 1 OSD chiclet (16 chiclets total)
-///   Fine step: 1 logical step = 1/4 chiclet
+///   LumiDisplay uses percent steps on a grid instead (DisplayControl): 10% per press,
+///   2% fine, values snap to multiples of the step; one OSD segment per step.
+///   Optional: contrast follows brightness changes (SyncContrastWithBrightness).
 /// </summary>
 public sealed class TrayApplicationContext : ApplicationContext
 {
@@ -50,7 +50,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     public TrayApplicationContext(bool openSettings = false, System.Threading.EventWaitHandle? showWindowEvent = null)
     {
         _settings = AppSettings.Load();
-        _osd = new OsdOverlay();
+        _osd = new OsdOverlay { SegmentCount = OsdOverlay.SegmentsForStep(_settings.StepPercent) };
 
         // A second launch (desktop icon, Start menu) signals this event: open the window here
         if (showWindowEvent != null)
@@ -217,29 +217,17 @@ public sealed class TrayApplicationContext : ApplicationContext
         }
 
         int step = _settings.AudioMediaKeyFineControlByDefault
-            ? _settings.FineStep
-            : _settings.StandardStep;
+            ? _settings.FineStepPercent
+            : _settings.StepPercent;
 
         switch (action)
         {
             case MediaKeyInterceptor.MediaKeyAction.VolumeUp:
-                foreach (var m in targets)
-                {
-                    var result = m.AdjustVolume(step, _settings.TotalSteps);
-                    if (result != null)
-                        _osd.Show(OsdOverlay.OsdType.Volume,
-                            (double)result.Value.newValue / result.Value.maxValue);
-                }
+                AdjustAllVolume(targets, step, +1);
                 return true;
 
             case MediaKeyInterceptor.MediaKeyAction.VolumeDown:
-                foreach (var m in targets)
-                {
-                    var result = m.AdjustVolume(-step, _settings.TotalSteps);
-                    if (result != null)
-                        _osd.Show(OsdOverlay.OsdType.Volume,
-                            (double)result.Value.newValue / result.Value.maxValue);
-                }
+                AdjustAllVolume(targets, step, -1);
                 return true;
 
             case MediaKeyInterceptor.MediaKeyAction.VolumeMute:
@@ -265,8 +253,9 @@ public sealed class TrayApplicationContext : ApplicationContext
         var targets = GetTargetMonitors();
         if (targets.Count == 0) return;
 
-        int standardStep = _settings.StandardStep;
-        int fineStep = _settings.FineStep;
+        // Step sizes in percent; values snap to multiples of the step (60 → 70 → 80)
+        int standardStep = _settings.StepPercent;
+        int fineStep = _settings.FineStepPercent;
 
         if (_settings.VideoMediaKeyFineControlByDefault)
         {
@@ -275,8 +264,8 @@ public sealed class TrayApplicationContext : ApplicationContext
         }
 
         // Volume shortcuts follow the volume fine-scale setting and only drive monitors with a speaker
-        int volumeStep = _settings.StandardStep;
-        int volumeFineStep = _settings.FineStep;
+        int volumeStep = _settings.StepPercent;
+        int volumeFineStep = _settings.FineStepPercent;
         if (_settings.AudioMediaKeyFineControlByDefault)
             (volumeStep, volumeFineStep) = (volumeFineStep, volumeStep);
         var speakerTargets = targets.FindAll(m => _speakerMonitors.Contains(m));
@@ -284,28 +273,28 @@ public sealed class TrayApplicationContext : ApplicationContext
         switch (action)
         {
             case HotkeyManager.HotkeyAction.BrightnessUp:
-                AdjustAllBrightness(targets, standardStep);
+                AdjustAllBrightness(targets, standardStep, +1);
                 break;
             case HotkeyManager.HotkeyAction.BrightnessDown:
-                AdjustAllBrightness(targets, -standardStep);
+                AdjustAllBrightness(targets, standardStep, -1);
                 break;
             case HotkeyManager.HotkeyAction.BrightnessFineUp:
-                AdjustAllBrightness(targets, fineStep);
+                AdjustAllBrightness(targets, fineStep, +1);
                 break;
             case HotkeyManager.HotkeyAction.BrightnessFineDown:
-                AdjustAllBrightness(targets, -fineStep);
+                AdjustAllBrightness(targets, fineStep, -1);
                 break;
             case HotkeyManager.HotkeyAction.VolumeUp:
-                AdjustAllVolume(speakerTargets, volumeStep);
+                AdjustAllVolume(speakerTargets, volumeStep, +1);
                 break;
             case HotkeyManager.HotkeyAction.VolumeDown:
-                AdjustAllVolume(speakerTargets, -volumeStep);
+                AdjustAllVolume(speakerTargets, volumeStep, -1);
                 break;
             case HotkeyManager.HotkeyAction.VolumeFineUp:
-                AdjustAllVolume(speakerTargets, volumeFineStep);
+                AdjustAllVolume(speakerTargets, volumeFineStep, +1);
                 break;
             case HotkeyManager.HotkeyAction.VolumeFineDown:
-                AdjustAllVolume(speakerTargets, -volumeFineStep);
+                AdjustAllVolume(speakerTargets, volumeFineStep, -1);
                 break;
             case HotkeyManager.HotkeyAction.VolumeMute:
                 foreach (var m in speakerTargets)
@@ -316,52 +305,42 @@ public sealed class TrayApplicationContext : ApplicationContext
                 }
                 break;
             case HotkeyManager.HotkeyAction.ContrastUp:
-                AdjustAllContrast(targets, standardStep);
+                AdjustAllContrast(targets, _settings.StepPercent, +1);
                 break;
             case HotkeyManager.HotkeyAction.ContrastDown:
-                AdjustAllContrast(targets, -standardStep);
+                AdjustAllContrast(targets, _settings.StepPercent, -1);
                 break;
         }
     }
 
-    private void AdjustAllBrightness(List<IMonitor> targets, int step)
+    private void AdjustAllBrightness(List<IMonitor> targets, int stepPercent, int direction)
     {
         foreach (var m in targets)
         {
-            var result = m.AdjustBrightness(step, _settings.TotalSteps);
-            if (result != null)
-                _osd.Show(OsdOverlay.OsdType.Brightness,
-                    (double)result.Value.newValue / result.Value.maxValue);
+            var change = DisplayControl.StepBrightness(m, stepPercent, direction, _settings.SyncContrastWithBrightness);
+            if (change != null)
+                _osd.Show(OsdOverlay.OsdType.Brightness, change.Value.NewPercent / 100.0);
         }
     }
 
-    private void AdjustAllVolume(List<IMonitor> targets, int step)
+    private void AdjustAllVolume(List<IMonitor> targets, int stepPercent, int direction)
     {
         foreach (var m in targets)
         {
-            var result = m.AdjustVolume(step, _settings.TotalSteps);
-            if (result != null)
-                _osd.Show(OsdOverlay.OsdType.Volume,
-                    (double)result.Value.newValue / result.Value.maxValue);
+            var change = DisplayControl.StepVolume(m, stepPercent, direction);
+            if (change != null)
+                _osd.Show(OsdOverlay.OsdType.Volume, change.Value.NewPercent / 100.0);
         }
     }
 
-    private void AdjustAllContrast(List<IMonitor> targets, int step)
+    // Manual contrast: never touches brightness, even when contrast follows brightness
+    private void AdjustAllContrast(List<IMonitor> targets, int stepPercent, int direction)
     {
         foreach (var m in targets)
         {
-            var cur = m.GetContrast();
-            if (cur == null) continue;
-
-            uint max = cur.Value.max;
-            if (max == 0) continue;
-
-            double stepSize = (double)max / _settings.TotalSteps;
-            int newVal = (int)Math.Round(cur.Value.current + step * stepSize);
-            newVal = Math.Clamp(newVal, 0, (int)max);
-
-            if (m.SetContrast((uint)newVal))
-                _osd.Show(OsdOverlay.OsdType.Contrast, (double)newVal / max);
+            var change = DisplayControl.StepContrast(m, stepPercent, direction);
+            if (change != null)
+                _osd.Show(OsdOverlay.OsdType.Contrast, change.Value.NewPercent / 100.0);
         }
     }
 
@@ -458,7 +437,8 @@ public sealed class TrayApplicationContext : ApplicationContext
         // Quick adjust submenu
         var brightnessMenu = new ToolStripMenuItem("Brightness", MenuGlyph(Glyph.Sun));
         brightnessMenu.DropDown.Renderer = menu.Renderer;
-        foreach (int pct in new[] { 0, 25, 50, 75, 100 })
+        // Presets sit on the same 10% grid the keys use
+        foreach (int pct in new[] { 0, 20, 40, 60, 80, 100 })
         {
             int p = pct;
             var item = new ToolStripMenuItem($"{p}%");
@@ -470,7 +450,7 @@ public sealed class TrayApplicationContext : ApplicationContext
 
         var volumeMenu = new ToolStripMenuItem("Volume", MenuGlyph(Glyph.Speaker));
         volumeMenu.DropDown.Renderer = menu.Renderer;
-        foreach (int pct in new[] { 0, 25, 50, 75, 100 })
+        foreach (int pct in new[] { 0, 20, 40, 60, 80, 100 })
         {
             int p = pct;
             var item = new ToolStripMenuItem($"{p}%");
@@ -522,6 +502,24 @@ public sealed class TrayApplicationContext : ApplicationContext
             _settings.Save();
         };
         menu.Items.Add(fineVideoItem);
+
+        var syncContrastItem = new ToolStripMenuItem("Sync Contrast with Brightness")
+        { Checked = _settings.SyncContrastWithBrightness, CheckOnClick = true };
+        syncContrastItem.CheckedChanged += (_, _) =>
+        {
+            _settings.SyncContrastWithBrightness = syncContrastItem.Checked;
+            _settings.Save();
+        };
+        menu.Items.Add(syncContrastItem);
+
+        // The settings window can change these too; show the current state each time the menu opens
+        menu.Opening += (_, _) =>
+        {
+            interceptItem.Checked = _settings.InterceptMediaVolumeKeys;
+            fineAudioItem.Checked = _settings.AudioMediaKeyFineControlByDefault;
+            fineVideoItem.Checked = _settings.VideoMediaKeyFineControlByDefault;
+            syncContrastItem.Checked = _settings.SyncContrastWithBrightness;
+        };
 
         menu.Items.Add(new ToolStripSeparator());
 
@@ -588,6 +586,7 @@ public sealed class TrayApplicationContext : ApplicationContext
                 {
                     _hotkeysSuspended = false;
                     RegisterConfiguredHotkeys();
+                    _osd.SegmentCount = OsdOverlay.SegmentsForStep(_settings.StepPercent);
                     _mediaKeyInterceptor.Enabled = _settings.InterceptMediaVolumeKeys;
                     ReportHotkeyFailures();
                 },
@@ -638,13 +637,9 @@ public sealed class TrayApplicationContext : ApplicationContext
     {
         foreach (var m in GetTargetMonitors())
         {
-            var cur = m.GetBrightness();
-            if (cur != null)
-            {
-                uint val = (uint)(cur.Value.max * percent / 100);
-                if (m.SetBrightness(val))
-                    _osd.Show(OsdOverlay.OsdType.Brightness, percent / 100.0);
-            }
+            var change = DisplayControl.SetBrightnessPercent(m, percent, _settings.SyncContrastWithBrightness);
+            if (change != null)
+                _osd.Show(OsdOverlay.OsdType.Brightness, change.Value.NewPercent / 100.0);
         }
     }
 
@@ -652,13 +647,9 @@ public sealed class TrayApplicationContext : ApplicationContext
     {
         foreach (var m in GetTargetMonitors())
         {
-            var cur = m.GetVolume();
-            if (cur != null)
-            {
-                uint val = (uint)(cur.Value.max * percent / 100);
-                if (m.SetVolume(val))
-                    _osd.Show(OsdOverlay.OsdType.Volume, percent / 100.0);
-            }
+            var change = DisplayControl.SetVolumePercent(m, percent);
+            if (change != null)
+                _osd.Show(OsdOverlay.OsdType.Volume, change.Value.NewPercent / 100.0);
         }
     }
 
@@ -707,9 +698,9 @@ public sealed class TrayApplicationContext : ApplicationContext
         }
 
         info += $"Settings:\n" +
-                $"  Total Steps: {_settings.TotalSteps}\n" +
-                $"  Standard Step: {_settings.StandardStep} ({_settings.StandardStep * 100.0 / _settings.TotalSteps:F1}%)\n" +
-                $"  Fine Step: {_settings.FineStep} ({_settings.FineStep * 100.0 / _settings.TotalSteps:F1}%)\n" +
+                $"  Step: {_settings.StepPercent}%\n" +
+                $"  Fine Step: {_settings.FineStepPercent}%\n" +
+                $"  Sync Contrast with Brightness: {_settings.SyncContrastWithBrightness}\n" +
                 $"  Intercept Volume Keys: {_settings.InterceptMediaVolumeKeys}\n";
 
         MessageBox.Show(info, "Monitor Info", MessageBoxButtons.OK, MessageBoxIcon.Information);

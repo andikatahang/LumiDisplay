@@ -34,7 +34,9 @@
 - **Kecerahan & kontras hardware** untuk monitor eksternal lewat DDC/CI, juga untuk layar laptop.
 - **Volume speaker monitor** — tombol volume dan mute di keyboard mengatur speaker bawaan monitor.
 - **Shortcut keyboard** untuk kecerahan (langkah normal dan halus) serta kontras.
-- **Indikator di layar (OSD)** dengan 16 tingkat seperti macOS, jadi level saat ini selalu terlihat.
+- **Langkah rata 10%** untuk kecerahan, kontras, dan volume — setiap tekan berhenti di 10, 20, 30 … 100% (langkah halus 2% dengan Shift). Kedua ukuran bisa diatur.
+- **Sinkronkan kontras dengan kecerahan** (opsional) — kontras ikut berubah bersama kecerahan, sementara tombol kontras tetap bisa mengaturnya sendiri.
+- **Indikator di layar (OSD)** bergaya macOS, satu kotak per langkah, jadi level saat ini selalu terlihat.
 - **Berjalan di system tray** — ada preset cepat, pilihan monitor yang dikontrol, dan bisa ikut menyala bersama Windows.
 - **Portabel** — cukup satu file `.exe`, tanpa installer, tanpa perlu memasang .NET.
 
@@ -152,7 +154,7 @@ Flag untuk developer:
 | Antarmuka | WinForms dengan kontrol yang digambar sendiri, tema terang | [`SettingsForm.cs`](src/LumiDisplay/SettingsForm.cs), [`ThemedControls.cs`](src/LumiDisplay/ThemedControls.cs), [`Theme.cs`](src/LumiDisplay/Theme.cs) |
 | Pengaturan | JSON di `%LocalAppData%\LumiDisplay\settings.json` | [`AppSettings.cs`](src/LumiDisplay/AppSettings.cs) |
 
-Pembagian langkah mengikuti BetterDisplay di macOS: 64 langkah logis, 4 langkah per kotak OSD (6,25% per tekan, 1,56% untuk langkah halus).
+Pembagian langkah ([`DisplayControl.cs`](src/LumiDisplay/DisplayControl.cs)) memakai persen pada sebuah grid: setiap tekan berpindah ke kelipatan langkah berikutnya (bawaan 10%, halus 2%), jadi nilai yang diatur dari tempat lain (misalnya 63%) akan dibulatkan ke 70% saat naik atau 60% saat turun. Kalau *Sync contrast with brightness* aktif, kontras bergeser sebanyak poin yang sama dengan kecerahan (tidak pernah di bawah 10% selama sinkron). Cara ini menggantikan model 64 langkah logis BetterDisplay yang langkah 6,25%-nya menghasilkan persentase tidak rata.
 </details>
 
 ## Lisensi

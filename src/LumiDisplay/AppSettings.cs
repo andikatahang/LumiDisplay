@@ -15,22 +15,22 @@ namespace LumiDisplay;
 public sealed class AppSettings
 {
     /// <summary>
-    /// Total logical steps for the full range.
-    /// BetterDisplay default: 64 (16 chiclets × 4 steps per chiclet).
+    /// Percent per normal key press for brightness, contrast and volume. Values snap to
+    /// multiples of this step (60 → 70 → 80). Replaces BetterDisplay's 64-logical-step model,
+    /// whose 6.25% steps produced uneven percentages.
     /// </summary>
-    public int TotalSteps { get; set; } = 64;
+    public int StepPercent { get; set; } = 10;
 
     /// <summary>
-    /// Number of logical steps per standard keyboard press.
-    /// BetterDisplay default: 4 (one OSD chiclet).
+    /// Percent per fine-scale key press (brightness/volume with Shift, or the fine shortcuts).
     /// </summary>
-    public int StandardStep { get; set; } = 4;
+    public int FineStepPercent { get; set; } = 2;
 
     /// <summary>
-    /// Number of logical steps per fine-scale keyboard press.
-    /// BetterDisplay default: 1 (one-quarter of a chiclet).
+    /// When brightness changes, move contrast by the same number of percentage points.
+    /// Contrast shortcuts keep adjusting contrast on its own.
     /// </summary>
-    public int FineStep { get; set; } = 1;
+    public bool SyncContrastWithBrightness { get; set; } = false;
 
     /// <summary>
     /// Whether to intercept native media volume keys and redirect to DDC.
