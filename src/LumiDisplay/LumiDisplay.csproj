@@ -31,4 +31,12 @@
     </Content>
   </ItemGroup>
 
+  <!-- Inter UI font (SIL Open Font License, see Fonts/Inter-OFL.txt), embedded in the exe -->
+  <ItemGroup>
+    <EmbeddedResource Include="Fonts\Inter-Regular.ttf" LogicalName="LumiDisplay.Fonts.Inter-Regular.ttf" />
+    <EmbeddedResource Include="Fonts\Inter-Medium.ttf" LogicalName="LumiDisplay.Fonts.Inter-Medium.ttf" />
+    <EmbeddedResource Include="Fonts\Inter-SemiBold.ttf" LogicalName="LumiDisplay.Fonts.Inter-SemiBold.ttf" />
+    <None Include="Fonts\Inter-OFL.txt" />
+  </ItemGroup>
+
 </Project>

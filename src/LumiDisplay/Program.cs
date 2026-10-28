@@ -28,6 +28,7 @@ static class Program
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
+        UiFonts.Load();
 
         bool autostart = Array.Exists(args, a => a == StartupManager.AutostartArg);
 

@@ -1,8 +1,79 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Drawing.Text;
+using System.Runtime.InteropServices;
 
 namespace LumiDisplay;
+
+/// <summary>
+/// Inter (SIL OFL, bundled in Fonts/) loaded from embedded resources: into a GDI+
+/// PrivateFontCollection for <see cref="Font"/> objects and Graphics.DrawString, and into GDI
+/// (AddFontMemResourceEx) so TextRenderer and standard controls can use the same faces.
+/// Falls back to Segoe UI if anything fails.
+/// </summary>
+internal static class UiFonts
+{
+    private static readonly PrivateFontCollection Collection = new();
+    private static FontFamily? _regular, _medium, _semibold;
+
+    public static void Load()
+    {
+        try
+        {
+            var asm = typeof(UiFonts).Assembly;
+            foreach (var file in new[] { "Inter-Regular.ttf", "Inter-Medium.ttf", "Inter-SemiBold.ttf" })
+            {
+                using var stream = asm.GetManifestResourceStream("LumiDisplay.Fonts." + file);
+                if (stream == null) continue;
+                var data = new byte[stream.Length];
+                stream.ReadExactly(data);
+
+                // GDI+ needs the memory for the life of the collection: allocate once, never free
+                IntPtr mem = Marshal.AllocCoTaskMem(data.Length);
+                Marshal.Copy(data, 0, mem, data.Length);
+                Collection.AddMemoryFont(mem, data.Length);
+                uint installed = 0;
+                AddFontMemResourceEx(mem, (uint)data.Length, IntPtr.Zero, ref installed);
+            }
+
+            foreach (var family in Collection.Families)
+            {
+                switch (family.Name)
+                {
+                    case "Inter": _regular = family; break;
+                    case "Inter Medium": _medium = family; break;
+                    case "Inter SemiBold": _semibold = family; break;
+                }
+            }
+        }
+        catch
+        {
+            _regular = _medium = _semibold = null;
+        }
+    }
+
+    public static Font Create(float size, Weight weight, FontStyle style = FontStyle.Regular, GraphicsUnit unit = GraphicsUnit.Point)
+    {
+        var family = weight switch
+        {
+            Weight.SemiBold => _semibold ?? _medium,
+            Weight.Medium => _medium,
+            _ => _regular
+        };
+        if (family != null)
+            return new Font(family, size, style, unit);
+        return weight == Weight.Regular
+            ? new Font("Segoe UI", size, style, unit)
+            : new Font("Segoe UI Semibold", size, style, unit);
+    }
+
+    public enum Weight { Regular, Medium, SemiBold }
+
+    [DllImport("gdi32.dll")]
+    private static extern IntPtr AddFontMemResourceEx(IntPtr pFileView, uint cjSize, IntPtr pvReserved, ref uint pNumFonts);
+}
 
 /// <summary>
 /// LumiDisplay light palette: white and soft-gray surfaces with a dark blue accent.
@@ -26,8 +97,13 @@ internal static class Theme
     public static readonly Color Danger = Color.FromArgb(220, 38, 38);          // #DC2626
     public static readonly Color Success = Color.FromArgb(22, 163, 74);         // #16A34A
 
-    public const string FontFamily = "Segoe UI";
-    public const string FontFamilySemibold = "Segoe UI Semibold";
+    /// <summary>Corner radius (96-DPI px) for cards, buttons, inputs, list items and the OSD.</summary>
+    public const float Radius = 12f;
+
+    // Inter in three weights; Medium for labels and buttons, SemiBold for titles
+    public static Font Font(float size, FontStyle style = FontStyle.Regular) => UiFonts.Create(size, UiFonts.Weight.Regular, style);
+    public static Font MediumFont(float size) => UiFonts.Create(size, UiFonts.Weight.Medium);
+    public static Font SemiboldFont(float size) => UiFonts.Create(size, UiFonts.Weight.SemiBold);
 
     public static GraphicsPath RoundedRect(RectangleF r, float radius)
     {

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
@@ -10,7 +10,7 @@ namespace LumiDisplay;
 /// Allows configuring hotkeys, step sizes, startup preferences, and testing monitor adjustments.
 /// Light theme: white sidebar and cards on a soft-gray page, dark blue accent.
 /// </summary>
-public sealed class SettingsForm : Form
+public sealed class SettingsForm : Form, IGlassHost
 {
     [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
@@ -25,20 +25,69 @@ public sealed class SettingsForm : Form
     private const int FooterHeight = 68;
     private const int CardMargin = 28;
 
+    // --- Liquid glass backdrop ---
+
+    private readonly GlassBackdrop _backdrop = new();
+    GlassBackdrop IGlassHost.Backdrop => _backdrop;
+
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
-        // Windows 11: white caption bar with dark text to match the light theme (ignored on Windows 10)
+        Microsoft.Win32.SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
+        RefreshGlass();
+    }
+
+    protected override void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+        RefreshGlass(); // final position is known now
+    }
+
+    // Moving or resizing ends here; the glass shows the wallpaper under the window's new spot
+    protected override void OnResizeEnd(EventArgs e)
+    {
+        base.OnResizeEnd(e);
+        RefreshGlass();
+    }
+
+    protected override void OnDpiChanged(DpiChangedEventArgs e)
+    {
+        base.OnDpiChanged(e);
+        RefreshGlass();
+    }
+
+    private void OnUserPreferenceChanged(object? sender, Microsoft.Win32.UserPreferenceChangedEventArgs e)
+    {
+        if (e.Category != Microsoft.Win32.UserPreferenceCategory.Desktop || IsDisposed) return;
+        Glass.InvalidateWallpaper();
+        BeginInvoke(new Action(RefreshGlass));
+    }
+
+    private void RefreshGlass()
+    {
+        if (!IsHandleCreated || IsDisposed) return;
+        _backdrop.Rebuild(this);
+
+        // Windows 11: tint the title bar with the glass color so it reads as one surface
         try
         {
-            int caption = ColorTranslator.ToWin32(Theme.Surface);
+            int caption = ColorTranslator.ToWin32(_backdrop.TopColor);
             int text = ColorTranslator.ToWin32(Theme.Text);
-            int border = ColorTranslator.ToWin32(Theme.BorderStrong);
+            int border = ColorTranslator.ToWin32(Color.FromArgb(200, 208, 220));
             DwmSetWindowAttribute(Handle, DWMWA_CAPTION_COLOR, ref caption, sizeof(int));
             DwmSetWindowAttribute(Handle, DWMWA_TEXT_COLOR, ref text, sizeof(int));
             DwmSetWindowAttribute(Handle, DWMWA_BORDER_COLOR, ref border, sizeof(int));
         }
         catch { }
+        Invalidate(true);
+    }
+
+    protected override void OnPaintBackground(PaintEventArgs e)
+    {
+        if (_backdrop.Base != null)
+            e.Graphics.DrawImage(_backdrop.Base, 0, 0);
+        else
+            e.Graphics.Clear(Theme.Window);
     }
 
     private readonly AppSettings _settings;
@@ -65,8 +114,8 @@ public sealed class SettingsForm : Form
     private ToggleSwitch _chkForwardNative = null!;
 
     // Controls - Stepping
-    private NumericUpDown _numStepPercent = null!;
-    private NumericUpDown _numFineStepPercent = null!;
+    private Stepper _numStepPercent = null!;
+    private Stepper _numFineStepPercent = null!;
     private ToggleSwitch _chkSyncContrast = null!;
     private ToggleSwitch _chkFineVolumeDefault = null!;
     private ToggleSwitch _chkFineVideoDefault = null!;
@@ -222,6 +271,8 @@ public sealed class SettingsForm : Form
         // Never leave the global shortcuts paused if the window closes mid-recording
         _suspendHotkeys?.Invoke(false);
         _savedFlashTimer.Dispose();
+        Microsoft.Win32.SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
+        _backdrop.Dispose();
         base.OnFormClosed(e);
     }
 
@@ -239,32 +290,33 @@ public sealed class SettingsForm : Form
         StartPosition = FormStartPosition.CenterScreen;
         ShowInTaskbar = true;
         KeyPreview = true;
-        Font = new Font(Theme.FontFamily, 9F, FontStyle.Regular);
+        Font = Theme.Font(9F);
         BackColor = Theme.Window;
         ForeColor = Theme.Text;
         try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
 
-        // Content area (right): header, scrollable pages, footer
-        var header = new Panel
+        // Content area (right): header, scrollable pages, footer — all on the window's glass
+        var header = new GlassPanel
         {
             Location = new Point(SidebarWidth, 0),
-            Size = new Size(ContentWidth, HeaderHeight),
-            BackColor = Theme.Window
+            Size = new Size(ContentWidth, HeaderHeight)
         };
         _lblPageTitle = new Label
         {
-            Location = new Point(CardMargin, 22),
+            Location = new Point(CardMargin - 1, 22),
             AutoSize = true,
-            Font = new Font(Theme.FontFamilySemibold, 15F),
+            Font = Theme.SemiboldFont(15F),
             ForeColor = Theme.Text,
+            BackColor = Color.Transparent,
             UseMnemonic = false
         };
         _lblPageSubtitle = new Label
         {
-            Location = new Point(CardMargin + 2, 54),
+            Location = new Point(CardMargin, 54),
             AutoSize = true,
-            Font = new Font(Theme.FontFamily, 9F),
-            ForeColor = Theme.TextMuted
+            Font = Theme.Font(9F),
+            ForeColor = Theme.TextMuted,
+            BackColor = Color.Transparent
         };
         header.Controls.Add(_lblPageTitle);
         header.Controls.Add(_lblPageSubtitle);
@@ -290,81 +342,82 @@ public sealed class SettingsForm : Form
 
     private Panel BuildSidebar()
     {
-        var sidebar = new Panel
+        // A floating glass panel, inset from the window edges
+        const int inset = 12;
+        int width = SidebarWidth - inset * 2;
+        int height = 600 - inset * 2;
+        var sidebar = new GlassPanel
         {
-            Location = new Point(0, 0),
-            Size = new Size(SidebarWidth, 600),
-            BackColor = Theme.Surface
+            IsSurface = true,
+            Location = new Point(inset, inset),
+            Size = new Size(width, height)
         };
         sidebar.Paint += (_, e) =>
         {
             var g = e.Graphics;
             float s = sidebar.DeviceDpi / 96f;
-            Logo.Draw(g, new RectangleF(20 * s, 22 * s, 38 * s, 38 * s));
+            Logo.Draw(g, new RectangleF(14 * s, 14 * s, 36 * s, 36 * s));
 
-            using var nameFont = new Font(Theme.FontFamilySemibold, 12.5F);
-            using var tagFont = new Font(Theme.FontFamily, 8.25F);
-            TextRenderer.DrawText(g, "LumiDisplay", nameFont, new Point((int)(68 * s), (int)(21 * s)), Theme.Text,
+            using var nameFont = Theme.SemiboldFont(12F);
+            using var tagFont = Theme.Font(8F);
+            TextRenderer.DrawText(g, "LumiDisplay", nameFont, new Point((int)(60 * s), (int)(14 * s)), Theme.Text,
                 TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
-            TextRenderer.DrawText(g, "Display & audio control", tagFont, new Point((int)(69 * s), (int)(45 * s)), Theme.TextMuted,
+            TextRenderer.DrawText(g, "Display & audio control", tagFont, new Point((int)(61 * s), (int)(36 * s)), Theme.TextMuted,
                 TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
-
-            using var border = new Pen(Theme.Border, 1f);
-            g.DrawLine(border, sidebar.Width - 1, 0, sidebar.Width - 1, sidebar.Height);
         };
 
         var lblSection = new Label
         {
             Text = "SETTINGS",
-            Location = new Point(26, 86),
+            Location = new Point(18, 74),
             AutoSize = true,
-            Font = new Font(Theme.FontFamilySemibold, 7.5F),
-            ForeColor = Theme.TextFaint
+            Font = Theme.MediumFont(7.5F),
+            ForeColor = Theme.TextFaint,
+            BackColor = Color.Transparent
         };
         sidebar.Controls.Add(lblSection);
 
         for (int i = 0; i < _navItems.Count; i++)
         {
             var nav = _navItems[i];
-            nav.Location = new Point(12, 108 + i * 44);
+            nav.Location = new Point(8, 94 + i * 44);
+            nav.Width = width - 16;
             sidebar.Controls.Add(nav);
         }
 
         // Status block at the bottom of the sidebar
-        var status = new Panel
+        var status = new GlassPanel
         {
-            Location = new Point(12, 600 - 88),
-            Size = new Size(200, 64),
-            BackColor = Theme.Surface
+            Location = new Point(8, height - 8 - 60),
+            Size = new Size(width - 16, 60),
+            Fill = Color.FromArgb(120, 255, 255, 255),
+            Outline = true
         };
         status.Paint += (_, e) =>
         {
             var g = e.Graphics;
             g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
             float s = status.DeviceDpi / 96f;
-            using var path = Theme.RoundedRect(new RectangleF(0.5f, 0.5f, status.Width - 1.5f, status.Height - 1.5f), 10 * s);
-            using var fill = new SolidBrush(Theme.Window);
-            g.FillPath(fill, path);
             using var dot = new SolidBrush(_getMonitors().Count > 0 ? Theme.Success : Theme.TextFaint);
-            g.FillEllipse(dot, 14 * s, 17 * s, 8 * s, 8 * s);
+            g.FillEllipse(dot, 14 * s, 16 * s, 8 * s, 8 * s);
         };
         _lblMonitorStatus = new Label
         {
-            Location = new Point(28, 12),
+            Location = new Point(28, 11),
             AutoSize = true,
-            Font = new Font(Theme.FontFamilySemibold, 8.75F),
+            Font = Theme.MediumFont(8.75F),
             ForeColor = Theme.Text,
-            BackColor = Theme.Window
+            BackColor = Color.Transparent
         };
         var version = typeof(SettingsForm).Assembly.GetName().Version;
         var lblVersion = new Label
         {
             Text = $"Version {version?.Major}.{version?.Minor}.{version?.Build}",
-            Location = new Point(28, 34),
+            Location = new Point(28, 32),
             AutoSize = true,
-            Font = new Font(Theme.FontFamily, 8F),
+            Font = Theme.Font(8F),
             ForeColor = Theme.TextMuted,
-            BackColor = Theme.Window
+            BackColor = Color.Transparent
         };
         status.Controls.Add(_lblMonitorStatus);
         status.Controls.Add(lblVersion);
@@ -375,16 +428,16 @@ public sealed class SettingsForm : Form
 
     private Panel BuildFooter()
     {
-        var footer = new Panel
+        var footer = new GlassPanel
         {
             Location = new Point(SidebarWidth, 600 - FooterHeight),
-            Size = new Size(ContentWidth, FooterHeight),
-            BackColor = Theme.Surface
+            Size = new Size(ContentWidth, FooterHeight)
         };
         footer.Paint += (_, e) =>
         {
-            using var pen = new Pen(Theme.Border, 1f);
-            e.Graphics.DrawLine(pen, 0, 0, footer.Width, 0);
+            float s = footer.DeviceDpi / 96f;
+            using var pen = new Pen(Glass.Divider, 1f);
+            e.Graphics.DrawLine(pen, CardMargin * s, 0, footer.Width - CardMargin * s, 0);
         };
 
         // Closing the window keeps the app in the tray; this is the explicit way out
@@ -436,9 +489,9 @@ public sealed class SettingsForm : Form
             Size = new Size(150, 38),
             Location = new Point(ContentWidth - CardMargin - 132 - 10 - 100 - 12 - 150, 15),
             TextAlign = ContentAlignment.MiddleRight,
-            Font = new Font(Theme.FontFamily, 8.75F),
+            Font = Theme.Font(8.75F),
             ForeColor = Theme.TextMuted,
-            BackColor = Theme.Surface
+            BackColor = Color.Transparent
         };
         _savedFlashTimer.Tick += (_, _) =>
         {
@@ -461,21 +514,17 @@ public sealed class SettingsForm : Form
         nav.Click += (_, _) => SelectPage(index);
         _navItems.Add(nav);
 
-        var page = new Panel
+        // Scrolls with a slim overlay scrollbar; cards go into page.Content
+        var page = new GlassScrollPanel
         {
             Location = new Point(SidebarWidth, HeaderHeight),
             Size = new Size(ContentWidth, 600 - HeaderHeight - FooterHeight),
-            BackColor = Theme.Window,
-            AutoScroll = true,
             Visible = false
         };
-        build(page);
-
-        // Bottom spacer so the last card does not touch the footer when scrolled
-        int bottom = 0;
-        foreach (Control c in page.Controls)
-            bottom = Math.Max(bottom, c.Bottom);
-        page.Controls.Add(new Panel { Location = new Point(0, bottom), Size = new Size(1, 20), BackColor = Theme.Window });
+        page.Content.Size = page.Size;
+        build(page.Content);
+        // Bottom room so the last card does not touch the footer when scrolled
+        page.UpdateContentHeight(20);
 
         _pages.Add(page);
         _pageHeaders.Add((title, subtitle));
@@ -547,17 +596,12 @@ public sealed class SettingsForm : Form
         y += row.Height;
     }
 
-    private static NumericUpDown CreateNumber(int min, int max, int value) => new()
+    private static Stepper CreateNumber(int min, int max, int value) => new()
     {
-        Size = new Size(76, 27),
         Minimum = min,
         Maximum = max,
         Value = value,
-        BorderStyle = BorderStyle.FixedSingle,
-        BackColor = Theme.Surface,
-        ForeColor = Theme.Accent,
-        Font = new Font(Theme.FontFamilySemibold, 10F),
-        TextAlign = HorizontalAlignment.Center
+        Suffix = "%"
     };
 
     // --- Pages ---
@@ -661,11 +705,11 @@ public sealed class SettingsForm : Form
         // Instructions + reset
         var lblHelp = new Label
         {
-            Text = "Click a shortcut, then press the new keys. Backspace clears, Esc cancels.",
+            Text = "Click a shortcut, then press new keys. Backspace clears.",
             Location = new Point(CardMargin + 2, 10),
             AutoSize = true,
             ForeColor = Theme.TextMuted,
-            BackColor = Theme.Window
+            BackColor = Color.Transparent
         };
         var btnReset = new RoundedButton
         {
@@ -739,28 +783,30 @@ public sealed class SettingsForm : Form
         int y = 4;
         var target = AddCard(page, "Target display", "", ref y, 40 + 60 + 12);
 
-        // Flat ComboBox has no border of its own; host it in a rounded outlined frame
-        var comboHost = new Panel
+        // Flat ComboBox has no border of its own; host it in a white 12px-rounded frame on the glass
+        var comboHost = new GlassPanel
         {
-            Location = new Point(20, target.ContentTop - 2),
-            Size = new Size(target.Width - 40 - 96 - 10, 34),
-            BackColor = Theme.Surface,
+            Location = new Point(20, target.ContentTop - 3),
+            Size = new Size(target.Width - 40 - 96 - 10, 36),
+            Fill = Color.White,
+            Outline = true,
             Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
         };
         comboHost.Paint += (_, e) =>
         {
+            if (!_cboTargetMonitor.Focused) return;
             e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
             float s = comboHost.DeviceDpi / 96f;
-            using var path = Theme.RoundedRect(new RectangleF(0.5f, 0.5f, comboHost.Width - 1.5f, comboHost.Height - 1.5f), 8 * s);
-            using var pen = new Pen(_cboTargetMonitor.Focused ? Theme.Accent : Theme.BorderStrong, 1f);
+            using var path = Theme.RoundedRect(new RectangleF(0.5f, 0.5f, comboHost.Width - 1.5f, comboHost.Height - 1.5f), Theme.Radius * s);
+            using var pen = new Pen(Color.FromArgb(150, Theme.Accent), 1f);
             e.Graphics.DrawPath(pen, path);
         };
         comboHost.Resize += (_, _) => comboHost.Invalidate();
 
         _cboTargetMonitor = new ComboBox
         {
-            Location = new Point(6, 3),
-            Size = new Size(comboHost.Width - 12, 28),
+            Location = new Point(10, 4),
+            Size = new Size(comboHost.Width - 20, 28),
             DropDownStyle = ComboBoxStyle.DropDownList,
             FlatStyle = FlatStyle.Flat,
             BackColor = Theme.Surface,
@@ -773,7 +819,7 @@ public sealed class SettingsForm : Form
         {
             if (e.Index < 0) return;
             bool selected = (e.State & DrawItemState.Selected) != 0 && (e.State & DrawItemState.ComboBoxEdit) == 0;
-            using var bg = new SolidBrush(selected ? Theme.AccentSoft : Theme.Surface);
+            using var bg = new SolidBrush(selected ? Color.FromArgb(232, 238, 248) : Theme.Surface);
             e.Graphics.FillRectangle(bg, e.Bounds);
             var textRect = Rectangle.Inflate(e.Bounds, -6, 0);
             TextRenderer.DrawText(e.Graphics, _cboTargetMonitor.Items[e.Index]?.ToString(), _cboTargetMonitor.Font, textRect,
@@ -788,8 +834,8 @@ public sealed class SettingsForm : Form
         var btnRefresh = new RoundedButton
         {
             Text = "Refresh",
-            Size = new Size(96, 30),
-            Location = new Point(target.Width - 20 - 96, target.ContentTop - 1),
+            Size = new Size(96, 36),
+            Location = new Point(target.Width - 20 - 96, target.ContentTop - 3),
             BackColor = Theme.Surface,
             Anchor = AnchorStyles.Top | AnchorStyles.Right
         };
@@ -830,19 +876,18 @@ public sealed class SettingsForm : Form
     private static (SliderBar slider, Label value) AddSliderRow(Card card, Glyph glyph, string caption, ref int y)
     {
         int rowY = y;
-        var icon = new Panel
+        var icon = new GlassPanel
         {
             Location = new Point(20, rowY + 9),
             Size = new Size(32, 32),
-            BackColor = Theme.Surface
+            Radius = 10,
+            Fill = Color.FromArgb(170, 255, 255, 255),
+            Outline = true
         };
         icon.Paint += (_, e) =>
         {
             e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
             float s = icon.DeviceDpi / 96f;
-            using var bg = Theme.RoundedRect(new RectangleF(0, 0, icon.Width - 1, icon.Height - 1), 8 * s);
-            using var fill = new SolidBrush(Theme.AccentSoft);
-            e.Graphics.FillPath(fill, bg);
             Glyphs.Draw(e.Graphics, glyph, new RectangleF(7 * s, 7 * s, 18 * s, 18 * s), Theme.Accent);
         };
 
@@ -851,9 +896,9 @@ public sealed class SettingsForm : Form
             Text = caption,
             Location = new Point(62, rowY + 16),
             AutoSize = true,
-            Font = new Font(Theme.FontFamilySemibold, 9.5F),
+            Font = Theme.MediumFont(9.5F),
             ForeColor = Theme.Text,
-            BackColor = Theme.Surface
+            BackColor = Color.Transparent
         };
 
         var slider = new SliderBar
@@ -870,9 +915,9 @@ public sealed class SettingsForm : Form
             Location = new Point(card.Width - 20 - 50, rowY + 15),
             Size = new Size(50, 22),
             TextAlign = ContentAlignment.MiddleRight,
-            Font = new Font(Theme.FontFamilySemibold, 10F),
+            Font = Theme.MediumFont(10F),
             ForeColor = Theme.Accent,
-            BackColor = Theme.Surface,
+            BackColor = Color.Transparent,
             Anchor = AnchorStyles.Top | AnchorStyles.Right
         };
 

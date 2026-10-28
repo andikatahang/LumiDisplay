@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
@@ -52,7 +52,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     public TrayApplicationContext(bool openSettings = false, System.Threading.EventWaitHandle? showWindowEvent = null)
     {
         _settings = AppSettings.Load();
-        _osd = new OsdOverlay { SegmentCount = OsdOverlay.SegmentsForStep(_settings.StepPercent) };
+        _osd = new OsdOverlay();
         var ui = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
         _worker = new DisplayWorker(ui, (type, fraction) => _osd.Show(type, fraction), muted => _osd.ShowMute(muted));
 
@@ -365,7 +365,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             Renderer = new LumiDisplayMenuRenderer(),
             BackColor = Theme.Surface,
             ForeColor = Theme.Text,
-            Font = new Font(Theme.FontFamily, 9F),
+            Font = Theme.Font(9F),
             Padding = new Padding(4, 6, 4, 6),
             ShowCheckMargin = false,
             ShowImageMargin = true
@@ -375,7 +375,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         var header = new ToolStripLabel("LumiDisplay")
         {
             Image = Logo.ToBitmap(32),
-            Font = new Font(Theme.FontFamilySemibold, 10F),
+            Font = Theme.MediumFont(10F),
             ForeColor = Theme.Accent,
             Padding = new Padding(0, 4, 0, 6)
         };
@@ -383,7 +383,7 @@ public sealed class TrayApplicationContext : ApplicationContext
 
         // Settings / Preferences item
         var settingsItem = new ToolStripMenuItem("Settings…", MenuGlyph(Glyph.Gear));
-        settingsItem.Font = new Font(Theme.FontFamilySemibold, 9F);
+        settingsItem.Font = Theme.MediumFont(9F);
         settingsItem.Click += (_, _) => ShowSettingsDialog();
         menu.Items.Add(settingsItem);
 
@@ -583,7 +583,6 @@ public sealed class TrayApplicationContext : ApplicationContext
                 {
                     _hotkeysSuspended = false;
                     RegisterConfiguredHotkeys();
-                    _osd.SegmentCount = OsdOverlay.SegmentsForStep(_settings.StepPercent);
                     _mediaKeyInterceptor.Enabled = _settings.InterceptMediaVolumeKeys;
                     ReportHotkeyFailures();
                 },
