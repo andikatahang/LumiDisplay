@@ -75,6 +75,8 @@ public sealed class SettingsForm : Form
     // Controls - Hotkeys
     private ToggleSwitch _chkBrightnessHotkeys = null!;
     private ToggleSwitch _chkContrastHotkeys = null!;
+    private ToggleSwitch _chkVolumeHotkeys = null!;
+    private readonly Dictionary<HotkeyManager.HotkeyAction, ShortcutRecorder> _recorders = new();
 
     // Controls - Monitors & Testing
     private ComboBox _cboTargetMonitor = null!;
@@ -92,17 +94,31 @@ public sealed class SettingsForm : Form
         Action onSettingsChanged,
         Func<IReadOnlyList<IMonitor>> getMonitors,
         Action<OsdOverlay.OsdType, double> showOsd,
-        Action? onQuit = null)
+        Action? onQuit = null,
+        Func<IReadOnlyCollection<HotkeyManager.HotkeyAction>>? getFailedHotkeys = null,
+        Action<bool>? suspendHotkeys = null)
     {
         _settings = settings;
         _onSettingsChanged = onSettingsChanged;
         _getMonitors = getMonitors;
         _showOsd = showOsd;
         _onQuit = onQuit;
+        _getFailedHotkeys = getFailedHotkeys;
+        _suspendHotkeys = suspendHotkeys;
 
         InitializeComponent();
         LoadSettings();
         SelectPage(0);
+    }
+
+    private readonly Func<IReadOnlyCollection<HotkeyManager.HotkeyAction>>? _getFailedHotkeys;
+    private readonly Action<bool>? _suspendHotkeys;
+
+    protected override void OnFormClosed(FormClosedEventArgs e)
+    {
+        // Never leave the global shortcuts paused if the window closes mid-recording
+        _suspendHotkeys?.Invoke(false);
+        base.OnFormClosed(e);
     }
 
     private void InitializeComponent()
@@ -471,27 +487,82 @@ public sealed class SettingsForm : Form
     {
         _chkBrightnessHotkeys = new ToggleSwitch();
         _chkContrastHotkeys = new ToggleSwitch();
+        _chkVolumeHotkeys = new ToggleSwitch();
 
-        int y = 4;
-        var bright = AddCard(page, "Brightness", "", ref y, 4 * 42);
+        // Instructions + reset
+        var lblHelp = new Label
+        {
+            Text = "Click a shortcut, then press the new keys. Backspace clears, Esc cancels.",
+            Location = new Point(CardMargin + 2, 10),
+            AutoSize = true,
+            ForeColor = Theme.TextMuted,
+            BackColor = Theme.Window
+        };
+        var btnReset = new RoundedButton
+        {
+            Text = "Reset to defaults",
+            Size = new Size(150, 32),
+            Location = new Point(ContentWidth - CardMargin - 150, 2),
+            BackColor = Theme.Window,
+            Anchor = AnchorStyles.Top | AnchorStyles.Right
+        };
+        btnReset.Click += (_, _) => ResetShortcutsToDefaults();
+        page.Controls.Add(lblHelp);
+        page.Controls.Add(btnReset);
+
+        int y = 48;
+        var bright = AddCard(page, "Brightness", "", ref y, 4 * 60);
         bright.HeaderControl = _chkBrightnessHotkeys;
         int ry = bright.ContentTop;
-        AddRow(bright, new ShortcutRow("Brightness up", "standard step", "Ctrl", "Alt", "↑"), ref ry);
-        AddRow(bright, new ShortcutRow("Brightness down", "standard step", "Ctrl", "Alt", "↓"), ref ry);
-        AddRow(bright, new ShortcutRow("Brightness up", "fine step", "Ctrl", "Alt", "Shift", "↑"), ref ry);
-        AddRow(bright, new ShortcutRow("Brightness down", "fine step", "Ctrl", "Alt", "Shift", "↓"), ref ry);
+        AddShortcutRow(bright, HotkeyManager.HotkeyAction.BrightnessUp, "One step brighter.", ref ry);
+        AddShortcutRow(bright, HotkeyManager.HotkeyAction.BrightnessDown, "One step dimmer.", ref ry);
+        AddShortcutRow(bright, HotkeyManager.HotkeyAction.BrightnessFineUp, "A smaller step brighter.", ref ry);
+        AddShortcutRow(bright, HotkeyManager.HotkeyAction.BrightnessFineDown, "A smaller step dimmer.", ref ry);
 
-        var contrast = AddCard(page, "Contrast", "", ref y, 2 * 42);
+        var volume = AddCard(page, "Volume", "Optional extra keys. Keyboard volume keys already work on their own.", ref y, 5 * 60);
+        volume.HeaderControl = _chkVolumeHotkeys;
+        ry = volume.ContentTop;
+        AddShortcutRow(volume, HotkeyManager.HotkeyAction.VolumeUp, "Monitor speaker one step louder.", ref ry);
+        AddShortcutRow(volume, HotkeyManager.HotkeyAction.VolumeDown, "Monitor speaker one step quieter.", ref ry);
+        AddShortcutRow(volume, HotkeyManager.HotkeyAction.VolumeFineUp, "A smaller step louder.", ref ry);
+        AddShortcutRow(volume, HotkeyManager.HotkeyAction.VolumeFineDown, "A smaller step quieter.", ref ry);
+        AddShortcutRow(volume, HotkeyManager.HotkeyAction.VolumeMute, "Toggle the monitor speaker on and off.", ref ry);
+
+        var contrast = AddCard(page, "Contrast", "", ref y, 2 * 60);
         contrast.HeaderControl = _chkContrastHotkeys;
         ry = contrast.ContentTop;
-        AddRow(contrast, new ShortcutRow("Contrast up", "", "Ctrl", "Alt", "→"), ref ry);
-        AddRow(contrast, new ShortcutRow("Contrast down", "", "Ctrl", "Alt", "←"), ref ry);
+        AddShortcutRow(contrast, HotkeyManager.HotkeyAction.ContrastUp, "One step more contrast.", ref ry);
+        AddShortcutRow(contrast, HotkeyManager.HotkeyAction.ContrastDown, "One step less contrast.", ref ry);
+    }
 
-        var media = AddCard(page, "Media keys", "Active when “Intercept volume keys” is on.", ref y, 3 * 42);
-        ry = media.ContentTop;
-        AddRow(media, new ShortcutRow("Speaker volume up", "", "Volume +"), ref ry);
-        AddRow(media, new ShortcutRow("Speaker volume down", "", "Volume −"), ref ry);
-        AddRow(media, new ShortcutRow("Toggle speaker mute", "", "Mute"), ref ry);
+    private void AddShortcutRow(Card card, HotkeyManager.HotkeyAction action, string description, ref int y)
+    {
+        var recorder = new ShortcutRecorder
+        {
+            Validate = (mods, key) =>
+            {
+                foreach (var (other, r) in _recorders)
+                {
+                    if (other != action && r.HasBinding && r.Modifiers == mods && r.Key == key)
+                        return $"Already used by {HotkeyManager.ActionName(other)}";
+                }
+                return null;
+            }
+        };
+        recorder.BindingChanged += (_, _) => recorder.Unavailable = false;
+        recorder.RecordingChanged += (_, recording) => _suspendHotkeys?.Invoke(recording);
+        _recorders[action] = recorder;
+        AddRow(card, new SettingRow(HotkeyManager.ActionName(action), description, recorder), ref y);
+    }
+
+    private void ResetShortcutsToDefaults()
+    {
+        foreach (var (action, recorder) in _recorders)
+        {
+            var binding = Array.Find(HotkeyManager.DefaultBindings, b => b.Action == action);
+            recorder.SetBinding(binding?.Modifiers ?? 0, binding?.Key ?? Keys.None);
+            recorder.Unavailable = false;
+        }
     }
 
     private void BuildMonitorsTab(Panel page)
@@ -661,6 +732,15 @@ public sealed class SettingsForm : Form
 
         _chkBrightnessHotkeys.Checked = _settings.EnableBrightnessHotkeys;
         _chkContrastHotkeys.Checked = _settings.EnableContrastHotkeys;
+        _chkVolumeHotkeys.Checked = _settings.EnableVolumeHotkeys;
+
+        var failed = _getFailedHotkeys?.Invoke() ?? Array.Empty<HotkeyManager.HotkeyAction>();
+        foreach (var (action, binding) in _settings.GetShortcutMap())
+        {
+            if (!_recorders.TryGetValue(action, out var recorder)) continue;
+            recorder.SetBinding(binding?.Modifiers ?? 0, binding?.Key ?? Keys.None);
+            recorder.Unavailable = failed.Contains(action);
+        }
 
         PopulateMonitorsList();
     }
@@ -788,6 +868,16 @@ public sealed class SettingsForm : Form
 
         _settings.EnableBrightnessHotkeys = _chkBrightnessHotkeys.Checked;
         _settings.EnableContrastHotkeys = _chkContrastHotkeys.Checked;
+        _settings.EnableVolumeHotkeys = _chkVolumeHotkeys.Checked;
+
+        var shortcuts = _settings.GetShortcutMap();
+        foreach (var (action, recorder) in _recorders)
+        {
+            shortcuts[action] = recorder.HasBinding
+                ? new HotkeyManager.HotkeyBinding(action, recorder.Modifiers, recorder.Key)
+                : null;
+        }
+        _settings.SetShortcutMap(shortcuts);
 
         int sel = _cboTargetMonitor.SelectedIndex;
         _settings.SelectedMonitorIndex = (sel > 0) ? (sel - 1) : -1;

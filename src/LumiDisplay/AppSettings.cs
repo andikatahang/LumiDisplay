@@ -69,6 +69,61 @@ public sealed class AppSettings
     public bool EnableContrastHotkeys { get; set; } = true;
 
     /// <summary>
+    /// Enable the custom volume shortcuts (none are assigned by default; the keyboard's
+    /// volume keys are handled separately by the media key interceptor).
+    /// </summary>
+    public bool EnableVolumeHotkeys { get; set; } = true;
+
+    /// <summary>
+    /// User-customized shortcuts. Actions missing from this list use
+    /// <see cref="HotkeyManager.DefaultBindings"/>; an entry with Key = 0 means "not set".
+    /// </summary>
+    public List<ShortcutSetting> Shortcuts { get; set; } = new();
+
+    public sealed class ShortcutSetting
+    {
+        public string Action { get; set; } = "";
+        public uint Modifiers { get; set; }
+        public int Key { get; set; }
+    }
+
+    /// <summary>
+    /// The effective shortcut for every action (null = not set), merging saved values with defaults.
+    /// </summary>
+    public Dictionary<HotkeyManager.HotkeyAction, HotkeyManager.HotkeyBinding?> GetShortcutMap()
+    {
+        var map = new Dictionary<HotkeyManager.HotkeyAction, HotkeyManager.HotkeyBinding?>();
+        foreach (var action in Enum.GetValues<HotkeyManager.HotkeyAction>())
+            map[action] = Array.Find(HotkeyManager.DefaultBindings, b => b.Action == action);
+
+        foreach (var saved in Shortcuts)
+        {
+            if (!Enum.TryParse<HotkeyManager.HotkeyAction>(saved.Action, out var action)) continue;
+            map[action] = saved.Key == 0
+                ? null
+                : new HotkeyManager.HotkeyBinding(action, saved.Modifiers, (System.Windows.Forms.Keys)saved.Key);
+        }
+        return map;
+    }
+
+    /// <summary>
+    /// Stores every action's shortcut explicitly, so later changes to the defaults don't move them.
+    /// </summary>
+    public void SetShortcutMap(IReadOnlyDictionary<HotkeyManager.HotkeyAction, HotkeyManager.HotkeyBinding?> map)
+    {
+        Shortcuts = new List<ShortcutSetting>();
+        foreach (var (action, binding) in map)
+        {
+            Shortcuts.Add(new ShortcutSetting
+            {
+                Action = action.ToString(),
+                Modifiers = binding?.Modifiers ?? 0,
+                Key = binding == null ? 0 : (int)binding.Key
+            });
+        }
+    }
+
+    /// <summary>
     /// Start minimized to system tray.
     /// </summary>
     public bool StartMinimized { get; set; } = true;

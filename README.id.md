@@ -57,6 +57,8 @@
 | <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>→</kbd> / <kbd>←</kbd> | Naikkan / turunkan kontras |
 | <kbd>Volume +</kbd> / <kbd>Volume −</kbd> / <kbd>Mute</kbd> | Volume dan mute speaker monitor |
 
+**Atur shortcut sesuka Anda:** buka **Settings → Hotkeys**, klik sebuah shortcut, lalu tekan kombinasi tombol yang diinginkan. Semua shortcut kecerahan dan kontras bisa diganti, dan Anda bisa menambahkan tombol sendiri untuk menaikkan/menurunkan volume dan mute speaker monitor. Backspace menghapus shortcut, **Reset to defaults** mengembalikan shortcut bawaan di atas.
+
 - **Membuka jendela:** jalankan `LumiDisplay.exe` lagi, atau klik ikon di tray.
 - **Menutup jendela:** LumiDisplay tetap berjalan di tray, jadi tombol-tombol tetap berfungsi.
 - **Keluar sepenuhnya:** klik **Quit LumiDisplay** di jendela, atau klik kanan ikon tray → **Quit LumiDisplay**.
@@ -99,7 +101,7 @@ Itu peringatan SmartScreen untuk aplikasi tanpa tanda tangan digital yang diundu
 <details>
 <summary><b>Shortcut bentrok dengan aplikasi lain</b></summary>
 
-Matikan shortcut kecerahan atau kontras di halaman **Hotkeys**. Shortcut ini berlaku di seluruh sistem, jadi kalau aplikasi lain memakai kombinasi yang sama, salah satunya tidak akan berfungsi.
+Shortcut berlaku di seluruh sistem, jadi satu kombinasi hanya bisa dipakai satu aplikasi. Kalau aplikasi lain sudah memakai salah satu shortcut Anda, LumiDisplay menampilkan notifikasi dan menandai shortcut itu dengan warna merah di **Settings → Hotkeys** — klik lalu pilih kombinasi lain.
 </details>
 
 ## Cara uninstall

@@ -97,37 +97,58 @@ public sealed class TrayApplicationContext : ApplicationContext
 
         if (openSettings)
             ShowSettingsDialog();
+        else
+            ReportHotkeyFailures();
     }
+
+    // Shortcuts Windows refused (another app already owns the combination)
+    private readonly List<HotkeyManager.HotkeyAction> _hotkeyFailures = new();
+    private bool _hotkeysSuspended;
 
     private void RegisterConfiguredHotkeys()
     {
         _hotkeyManager.UnregisterAll();
+        _hotkeyFailures.Clear();
+        if (_hotkeysSuspended) return;
 
-        if (_settings.EnableBrightnessHotkeys)
+        foreach (var (action, binding) in _settings.GetShortcutMap())
         {
-            _hotkeyManager.RegisterHotkey(new HotkeyManager.HotkeyBinding(
-                HotkeyManager.HotkeyAction.BrightnessUp,
-                NativeMethods.MOD_CONTROL | NativeMethods.MOD_ALT, Keys.Up));
-            _hotkeyManager.RegisterHotkey(new HotkeyManager.HotkeyBinding(
-                HotkeyManager.HotkeyAction.BrightnessDown,
-                NativeMethods.MOD_CONTROL | NativeMethods.MOD_ALT, Keys.Down));
-            _hotkeyManager.RegisterHotkey(new HotkeyManager.HotkeyBinding(
-                HotkeyManager.HotkeyAction.BrightnessFineUp,
-                NativeMethods.MOD_CONTROL | NativeMethods.MOD_ALT | NativeMethods.MOD_SHIFT, Keys.Up));
-            _hotkeyManager.RegisterHotkey(new HotkeyManager.HotkeyBinding(
-                HotkeyManager.HotkeyAction.BrightnessFineDown,
-                NativeMethods.MOD_CONTROL | NativeMethods.MOD_ALT | NativeMethods.MOD_SHIFT, Keys.Down));
+            if (binding == null || !IsShortcutGroupEnabled(action)) continue;
+            if (!_hotkeyManager.RegisterHotkey(binding))
+                _hotkeyFailures.Add(action);
         }
+    }
 
-        if (_settings.EnableContrastHotkeys)
-        {
-            _hotkeyManager.RegisterHotkey(new HotkeyManager.HotkeyBinding(
-                HotkeyManager.HotkeyAction.ContrastUp,
-                NativeMethods.MOD_CONTROL | NativeMethods.MOD_ALT, Keys.Right));
-            _hotkeyManager.RegisterHotkey(new HotkeyManager.HotkeyBinding(
-                HotkeyManager.HotkeyAction.ContrastDown,
-                NativeMethods.MOD_CONTROL | NativeMethods.MOD_ALT, Keys.Left));
-        }
+    private bool IsShortcutGroupEnabled(HotkeyManager.HotkeyAction action) => action switch
+    {
+        HotkeyManager.HotkeyAction.BrightnessUp or HotkeyManager.HotkeyAction.BrightnessDown
+            or HotkeyManager.HotkeyAction.BrightnessFineUp or HotkeyManager.HotkeyAction.BrightnessFineDown
+            => _settings.EnableBrightnessHotkeys,
+        HotkeyManager.HotkeyAction.ContrastUp or HotkeyManager.HotkeyAction.ContrastDown
+            => _settings.EnableContrastHotkeys,
+        _ => _settings.EnableVolumeHotkeys
+    };
+
+    /// <summary>
+    /// Released while the settings window records a new shortcut, so pressing the current
+    /// combination reaches the recorder instead of adjusting the display.
+    /// </summary>
+    private void SetHotkeysSuspended(bool suspended)
+    {
+        if (_hotkeysSuspended == suspended) return;
+        _hotkeysSuspended = suspended;
+        RegisterConfiguredHotkeys();
+    }
+
+    private void ReportHotkeyFailures()
+    {
+        if (_hotkeyFailures.Count == 0) return;
+        var map = _settings.GetShortcutMap();
+        var lines = _hotkeyFailures.ConvertAll(a =>
+            $"{HotkeyManager.ActionName(a)} ({HotkeyManager.Describe(map[a]!)})");
+        _trayIcon.ShowBalloonTip(6000, "Some shortcuts are already in use",
+            string.Join(", ", lines) + " — another app owns them. Pick different keys in Settings → Hotkeys.",
+            ToolTipIcon.Warning);
     }
 
     private void RefreshMonitors()
@@ -253,6 +274,13 @@ public sealed class TrayApplicationContext : ApplicationContext
             (standardStep, fineStep) = (fineStep, standardStep);
         }
 
+        // Volume shortcuts follow the volume fine-scale setting and only drive monitors with a speaker
+        int volumeStep = _settings.StandardStep;
+        int volumeFineStep = _settings.FineStep;
+        if (_settings.AudioMediaKeyFineControlByDefault)
+            (volumeStep, volumeFineStep) = (volumeFineStep, volumeStep);
+        var speakerTargets = targets.FindAll(m => _speakerMonitors.Contains(m));
+
         switch (action)
         {
             case HotkeyManager.HotkeyAction.BrightnessUp:
@@ -268,19 +296,19 @@ public sealed class TrayApplicationContext : ApplicationContext
                 AdjustAllBrightness(targets, -fineStep);
                 break;
             case HotkeyManager.HotkeyAction.VolumeUp:
-                AdjustAllVolume(targets, standardStep);
+                AdjustAllVolume(speakerTargets, volumeStep);
                 break;
             case HotkeyManager.HotkeyAction.VolumeDown:
-                AdjustAllVolume(targets, -standardStep);
+                AdjustAllVolume(speakerTargets, -volumeStep);
                 break;
             case HotkeyManager.HotkeyAction.VolumeFineUp:
-                AdjustAllVolume(targets, fineStep);
+                AdjustAllVolume(speakerTargets, volumeFineStep);
                 break;
             case HotkeyManager.HotkeyAction.VolumeFineDown:
-                AdjustAllVolume(targets, -fineStep);
+                AdjustAllVolume(speakerTargets, -volumeFineStep);
                 break;
             case HotkeyManager.HotkeyAction.VolumeMute:
-                foreach (var m in targets)
+                foreach (var m in speakerTargets)
                 {
                     bool? wasMuted = m.GetMute();
                     if (m.ToggleMute())
@@ -509,9 +537,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             "Intelligent external display & laptop brightness and audio control.\n" +
             "Native Windows equivalent of BetterDisplay's display controllers.\n\n" +
             "Keyboard Shortcuts:\n" +
-            "  Ctrl+Alt+Up/Down: Brightness ±1 chiclet (6.25%)\n" +
-            "  Ctrl+Alt+Shift+Up/Down: Fine brightness (1.56%)\n" +
-            "  Ctrl+Alt+Left/Right: Contrast\n" +
+            DescribeShortcuts() +
             "  Volume keys: Monitor audio (when intercepted)\n\n" +
             "Controllers Supported:\n" +
             "  • DDC/CI (dxva2.dll) - VCP 0x10, 0x12, 0x62, 0x8D\n" +
@@ -528,6 +554,17 @@ public sealed class TrayApplicationContext : ApplicationContext
 
         ApplyItemPadding(menu.Items);
         return menu;
+    }
+
+    private string DescribeShortcuts()
+    {
+        var text = "";
+        foreach (var (action, binding) in _settings.GetShortcutMap())
+        {
+            if (binding != null && IsShortcutGroupEnabled(action))
+                text += $"  {HotkeyManager.Describe(binding)}: {HotkeyManager.ActionName(action)}\n";
+        }
+        return text;
     }
 
     private static Bitmap MenuGlyph(Glyph glyph) => Glyphs.ToBitmap(glyph, 32, Theme.TextMuted);
@@ -549,12 +586,16 @@ public sealed class TrayApplicationContext : ApplicationContext
                 _settings,
                 onSettingsChanged: () =>
                 {
+                    _hotkeysSuspended = false;
                     RegisterConfiguredHotkeys();
                     _mediaKeyInterceptor.Enabled = _settings.InterceptMediaVolumeKeys;
+                    ReportHotkeyFailures();
                 },
                 getMonitors: () => _monitors.AsReadOnly(),
                 showOsd: (type, frac) => _osd.Show(type, frac),
-                onQuit: ExitApplication);
+                onQuit: ExitApplication,
+                getFailedHotkeys: () => _hotkeyFailures.AsReadOnly(),
+                suspendHotkeys: SetHotkeysSuspended);
             var form = _settingsForm;
             form.FormClosed += (_, _) =>
             {

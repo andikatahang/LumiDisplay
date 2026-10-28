@@ -57,6 +57,8 @@
 | <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>→</kbd> / <kbd>←</kbd> | Contrast up / down |
 | <kbd>Volume +</kbd> / <kbd>Volume −</kbd> / <kbd>Mute</kbd> | Monitor speaker volume and mute |
 
+**Make the shortcuts your own:** open **Settings → Hotkeys**, click a shortcut and press the keys you want. You can change every brightness and contrast shortcut, and add your own keys for monitor volume up/down and mute. Backspace clears a shortcut, **Reset to defaults** brings back the ones above.
+
 - **Open the window:** launch `LumiDisplay.exe` again, or click the tray icon.
 - **Close the window:** LumiDisplay keeps running in the tray so your keys keep working.
 - **Quit completely:** click **Quit LumiDisplay** in the window, or right-click the tray icon → **Quit LumiDisplay**.
@@ -99,7 +101,7 @@ This is SmartScreen warning about an unsigned app downloaded from the internet. 
 <details>
 <summary><b>A shortcut conflicts with another app</b></summary>
 
-Turn off the brightness or contrast shortcuts in **Hotkeys**. The shortcuts are registered system-wide, so another app using the same combination will prevent one of them from working.
+Shortcuts are registered system-wide, so only one app can own a combination. When another app already uses one of yours, LumiDisplay shows a notification and marks that shortcut red in **Settings → Hotkeys** — click it and pick different keys.
 </details>
 
 ## Uninstall

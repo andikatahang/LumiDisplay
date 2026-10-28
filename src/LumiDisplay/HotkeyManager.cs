@@ -56,7 +56,8 @@ public sealed class HotkeyManager : IDisposable
     /// Windows equivalents:
     ///   Ctrl+Alt+Up/Down for brightness
     ///   Ctrl+Alt+Shift+Up/Down for fine brightness
-    ///   (Volume/mute handled by media key interceptor by default)
+    ///   (Volume/mute handled by media key interceptor by default; volume shortcuts start unset)
+    /// Users can change any of these in Settings → Hotkeys (stored in AppSettings.Shortcuts).
     /// </summary>
     public static readonly HotkeyBinding[] DefaultBindings = new[]
     {
@@ -129,4 +130,73 @@ public sealed class HotkeyManager : IDisposable
             UnregisterAll();
         }
     }
+
+    // --- Display helpers ---
+
+    public static string ActionName(HotkeyAction action) => action switch
+    {
+        HotkeyAction.BrightnessUp => "Brightness up",
+        HotkeyAction.BrightnessDown => "Brightness down",
+        HotkeyAction.BrightnessFineUp => "Brightness up (fine)",
+        HotkeyAction.BrightnessFineDown => "Brightness down (fine)",
+        HotkeyAction.VolumeUp => "Volume up",
+        HotkeyAction.VolumeDown => "Volume down",
+        HotkeyAction.VolumeFineUp => "Volume up (fine)",
+        HotkeyAction.VolumeFineDown => "Volume down (fine)",
+        HotkeyAction.VolumeMute => "Mute",
+        HotkeyAction.ContrastUp => "Contrast up",
+        HotkeyAction.ContrastDown => "Contrast down",
+        _ => action.ToString()
+    };
+
+    /// <summary>Key cap labels for a binding, modifiers first, e.g. ["Ctrl", "Alt", "↑"].</summary>
+    public static string[] DescribeKeys(uint modifiers, Keys key)
+    {
+        var caps = new List<string>();
+        if ((modifiers & NativeMethods.MOD_CONTROL) != 0) caps.Add("Ctrl");
+        if ((modifiers & NativeMethods.MOD_ALT) != 0) caps.Add("Alt");
+        if ((modifiers & NativeMethods.MOD_SHIFT) != 0) caps.Add("Shift");
+        if ((modifiers & NativeMethods.MOD_WIN) != 0) caps.Add("Win");
+        if (key != Keys.None) caps.Add(KeyName(key));
+        return caps.ToArray();
+    }
+
+    public static string Describe(HotkeyBinding binding) =>
+        string.Join(" + ", DescribeKeys(binding.Modifiers, binding.Key));
+
+    public static string KeyName(Keys key)
+    {
+        switch (key)
+        {
+            case Keys.Up: return "↑";
+            case Keys.Down: return "↓";
+            case Keys.Left: return "←";
+            case Keys.Right: return "→";
+            case Keys.PageUp: return "PgUp";
+            case Keys.PageDown: return "PgDn";
+            case Keys.Insert: return "Ins";
+            case Keys.Delete: return "Del";
+            case Keys.Enter: return "Enter";
+            case Keys.Back: return "Backspace";
+            case Keys.Add: return "Num +";
+            case Keys.Subtract: return "Num −";
+            case Keys.Multiply: return "Num *";
+            case Keys.Divide: return "Num /";
+            case Keys.Decimal: return "Num .";
+        }
+        if (key >= Keys.D0 && key <= Keys.D9) return ((char)('0' + (key - Keys.D0))).ToString();
+        if (key >= Keys.NumPad0 && key <= Keys.NumPad9) return $"Num {key - Keys.NumPad0}";
+        if (key >= Keys.Oem1 && key <= Keys.Oem102 || key is Keys.Oemplus or Keys.Oemcomma or Keys.OemMinus or Keys.OemPeriod)
+        {
+            // Punctuation keys: ask the active keyboard layout which character they produce
+            uint ch = MapVirtualKey((uint)key, MAPVK_VK_TO_CHAR) & 0x7FFF;
+            if (ch != 0) return char.ToUpperInvariant((char)ch).ToString();
+        }
+        return key.ToString();
+    }
+
+    private const uint MAPVK_VK_TO_CHAR = 2;
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern uint MapVirtualKey(uint uCode, uint uMapType);
 }

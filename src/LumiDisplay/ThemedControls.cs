@@ -352,23 +352,277 @@ internal sealed class SettingRow : ThemedControl
 }
 
 /// <summary>
-/// A keyboard shortcut row: action on the left, key caps on the right.
+/// Draws keyboard key caps ("Ctrl" + "Alt" + "↑") left to right.
 /// </summary>
-internal sealed class ShortcutRow : ThemedControl
+internal static class KeyCaps
 {
-    private readonly string _action;
-    private readonly string _hint;
-    private readonly string[] _keys;
-
-    public ShortcutRow(string action, string hint, params string[] keys)
+    /// <summary>Draws the caps starting at <paramref name="x"/>, vertically centred on <paramref name="centerY"/>; returns the end X.</summary>
+    public static float Draw(Graphics g, string[] keys, float x, float centerY, float scale, Color textColor, Color borderColor)
     {
-        _action = action;
-        _hint = hint;
-        _keys = keys;
-        BackColor = Theme.Surface;
-        Height = 42;
-        Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+        using var keyFont = new Font(Theme.FontFamilySemibold, 8.25f);
+        using var plusFont = new Font(Theme.FontFamily, 8.5f);
+        var flags = TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine;
+        float capH = 22 * scale;
+        float y = centerY - capH / 2f;
+
+        for (int i = 0; i < keys.Length; i++)
+        {
+            if (i > 0)
+            {
+                // Grayscale antialiasing: ClearType tints this thin glyph
+                var plusHint = g.TextRenderingHint;
+                g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+                using var plusBrush = new SolidBrush(Theme.TextFaint);
+                using var plusFormat = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+                g.DrawString("+", plusFont, plusBrush, new RectangleF(x, y, 16 * scale, capH), plusFormat);
+                g.TextRenderingHint = plusHint;
+                x += 16 * scale;
+            }
+
+            var textSize = TextRenderer.MeasureText(g, keys[i], keyFont, Size.Empty, flags);
+            float capW = Math.Max(capH, textSize.Width + 14 * scale);
+            var cap = new RectangleF(x, y, capW, capH);
+            using (var capPath = Theme.RoundedRect(cap, 6 * scale))
+            {
+                using var fill = new SolidBrush(Theme.SurfaceAlt);
+                g.FillPath(fill, capPath);
+                using var border = new Pen(borderColor, 1f);
+                g.DrawPath(border, capPath);
+            }
+            // Bottom edge gives the cap a little depth
+            using (var edge = new Pen(borderColor, 1.5f * scale))
+                g.DrawLine(edge, cap.X + 5 * scale, cap.Bottom, cap.Right - 5 * scale, cap.Bottom);
+
+            if (keys[i] is "↑" or "↓" or "←" or "→")
+            {
+                // Thin arrow glyphs get ClearType colour fringes; draw them grayscale-antialiased
+                var hint = g.TextRenderingHint;
+                g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+                using var arrowFont = new Font("Segoe UI Symbol", 9f, FontStyle.Bold);
+                using var brush = new SolidBrush(textColor);
+                using var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+                g.DrawString(keys[i], arrowFont, brush, cap, sf);
+                g.TextRenderingHint = hint;
+            }
+            else
+            {
+                TextRenderer.DrawText(g, keys[i], keyFont, Rectangle.Round(cap), textColor,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
+            }
+            x += capW;
+        }
+        return x;
     }
+}
+
+/// <summary>
+/// Click-to-record shortcut field. Click (or Enter/Space), then press the new combination;
+/// Esc cancels, Backspace/Delete clears, the × on hover clears too.
+/// </summary>
+internal sealed class ShortcutRecorder : ThemedControl
+{
+    private uint _modifiers;
+    private Keys _key = Keys.None;
+    private bool _recording;
+    private bool _hover;
+    private bool _hoverClear;
+    private string? _error;
+    private readonly System.Windows.Forms.Timer _errorTimer = new() { Interval = 2600 };
+    private readonly ToolTip _tip = new();
+
+    /// <summary>Returns an error message to reject a combination (e.g. already used), or null to accept it.</summary>
+    public Func<uint, Keys, string?>? Validate { get; set; }
+
+    public event EventHandler? BindingChanged;
+    public event EventHandler<bool>? RecordingChanged;
+
+    public uint Modifiers => _modifiers;
+    public Keys Key => _key;
+    public bool HasBinding => _key != Keys.None;
+
+    private bool _unavailable;
+
+    /// <summary>Marks the shortcut as taken by another app (Windows refused to register it).</summary>
+    public bool Unavailable
+    {
+        get => _unavailable;
+        set
+        {
+            _unavailable = value;
+            _tip.SetToolTip(this, value
+                ? "Another app is already using this shortcut. Click to choose different keys."
+                : "Click, then press a new key combination. Backspace clears it.");
+            Invalidate();
+        }
+    }
+
+    public ShortcutRecorder()
+    {
+        SetStyle(ControlStyles.Selectable, true);
+        Size = new Size(236, 34);
+        Cursor = Cursors.Hand;
+        TabStop = true;
+        BackColor = Theme.Surface;
+        Unavailable = false;
+        _errorTimer.Tick += (_, _) =>
+        {
+            _errorTimer.Stop();
+            _error = null;
+            Invalidate();
+        };
+    }
+
+    public void SetBinding(uint modifiers, Keys key)
+    {
+        _modifiers = key == Keys.None ? 0 : modifiers;
+        _key = key;
+        Invalidate();
+    }
+
+    private RectangleF ClearRect => new(Width - Px(30), 0, Px(30), Height);
+
+    private void StartRecording()
+    {
+        if (_recording) return;
+        Focus();
+        _recording = true;
+        _error = null;
+        RecordingChanged?.Invoke(this, true);
+        Invalidate();
+    }
+
+    private void StopRecording()
+    {
+        if (!_recording) return;
+        _recording = false;
+        RecordingChanged?.Invoke(this, false);
+        Invalidate();
+    }
+
+    private void ShowError(string message)
+    {
+        _error = message;
+        _errorTimer.Stop();
+        _errorTimer.Start();
+        Invalidate();
+    }
+
+    private void Commit(uint modifiers, Keys key)
+    {
+        SetBinding(modifiers, key);
+        StopRecording();
+        BindingChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    protected override void OnMouseDown(MouseEventArgs e)
+    {
+        base.OnMouseDown(e);
+        if (e.Button != MouseButtons.Left) return;
+        if (!_recording && HasBinding && ClearRect.Contains(e.Location))
+        {
+            Focus();
+            Commit(0, Keys.None);
+            return;
+        }
+        if (_recording) StopRecording();
+        else StartRecording();
+    }
+
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        bool overClear = ClearRect.Contains(e.Location);
+        if (overClear != _hoverClear) { _hoverClear = overClear; Invalidate(); }
+        base.OnMouseMove(e);
+    }
+
+    protected override void OnMouseEnter(EventArgs e) { _hover = true; Invalidate(); base.OnMouseEnter(e); }
+    protected override void OnMouseLeave(EventArgs e) { _hover = false; _hoverClear = false; Invalidate(); base.OnMouseLeave(e); }
+    protected override void OnGotFocus(EventArgs e) { Invalidate(); base.OnGotFocus(e); }
+
+    protected override void OnLostFocus(EventArgs e)
+    {
+        StopRecording();
+        Invalidate();
+        base.OnLostFocus(e);
+    }
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        if (!_recording && e.KeyCode is Keys.Enter or Keys.Space)
+        {
+            StartRecording();
+            e.Handled = true;
+        }
+        base.OnKeyDown(e);
+    }
+
+    protected override void OnKeyUp(KeyEventArgs e)
+    {
+        if (_recording) Invalidate(); // live modifier preview
+        base.OnKeyUp(e);
+    }
+
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    {
+        if (!_recording) return base.ProcessCmdKey(ref msg, keyData);
+        HandleRecordedKey(keyData);
+        return true;
+    }
+
+    private void HandleRecordedKey(Keys keyData)
+    {
+        Keys key = keyData & Keys.KeyCode;
+        Keys mods = keyData & Keys.Modifiers;
+
+        if (key is Keys.ControlKey or Keys.ShiftKey or Keys.Menu or Keys.LWin or Keys.RWin
+            or Keys.LControlKey or Keys.RControlKey or Keys.LShiftKey or Keys.RShiftKey or Keys.LMenu or Keys.RMenu)
+        {
+            Invalidate(); // still waiting for the main key
+            return;
+        }
+
+        uint modifiers = CurrentModifiers(mods);
+
+        if (modifiers == 0 && key == Keys.Escape) { StopRecording(); return; }
+        if (modifiers == 0 && key is Keys.Back or Keys.Delete) { Commit(0, Keys.None); return; }
+
+        if (key is Keys.VolumeUp or Keys.VolumeDown or Keys.VolumeMute)
+        {
+            ShowError("Volume keys already work on their own");
+            return;
+        }
+
+        bool isFunctionKey = key >= Keys.F1 && key <= Keys.F24;
+        bool hasStrongModifier = (modifiers & (NativeMethods.MOD_CONTROL | NativeMethods.MOD_ALT | NativeMethods.MOD_WIN)) != 0;
+        if (!isFunctionKey && !hasStrongModifier)
+        {
+            ShowError("Add Ctrl, Alt or Win to this key");
+            return;
+        }
+
+        var error = Validate?.Invoke(modifiers, key);
+        if (error != null)
+        {
+            ShowError(error);
+            return;
+        }
+
+        Commit(modifiers, key);
+    }
+
+    private static uint CurrentModifiers(Keys mods)
+    {
+        uint m = 0;
+        if ((mods & Keys.Control) != 0) m |= NativeMethods.MOD_CONTROL;
+        if ((mods & Keys.Alt) != 0) m |= NativeMethods.MOD_ALT;
+        if ((mods & Keys.Shift) != 0) m |= NativeMethods.MOD_SHIFT;
+        if ((GetKeyState((int)Keys.LWin) & 0x8000) != 0 || (GetKeyState((int)Keys.RWin) & 0x8000) != 0)
+            m |= NativeMethods.MOD_WIN;
+        return m;
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern short GetKeyState(int nVirtKey);
 
     protected override void OnPaint(PaintEventArgs e)
     {
@@ -376,53 +630,77 @@ internal sealed class ShortcutRow : ThemedControl
         PrepareGraphics(g);
         g.Clear(BackColor);
 
-        using (var divider = new Pen(Theme.Border, 1f))
-            g.DrawLine(divider, Px(20), 0, Width - Px(20), 0);
-
-        using var font = new Font(Theme.FontFamily, 9.25f);
-        using var hintFont = new Font(Theme.FontFamily, 8.5f);
-        using var keyFont = new Font(Theme.FontFamilySemibold, 8.25f);
-
-        var flags = TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine;
-        var actionSize = TextRenderer.MeasureText(g, _action, font, Size.Empty, flags);
-        TextRenderer.DrawText(g, _action, font, new Rectangle(PxI(20), 0, actionSize.Width + 2, Height), Theme.Text, flags);
-        if (!string.IsNullOrEmpty(_hint))
+        var rect = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
+        bool problem = _error != null || (_unavailable && !_recording);
+        Color border = _recording ? Theme.Accent
+                     : problem ? Theme.Danger
+                     : _hover || Focused ? Theme.TextFaint
+                     : Theme.BorderStrong;
+        using (var path = Theme.RoundedRect(rect, Px(8)))
         {
-            TextRenderer.DrawText(g, _hint, hintFont,
-                new Rectangle(PxI(20) + actionSize.Width + PxI(8), 0, PxI(200), Height), Theme.TextFaint, flags);
+            using var fill = new SolidBrush(_recording ? Theme.AccentSoft : Theme.Surface);
+            g.FillPath(fill, path);
+            using var pen = new Pen(border, _recording ? Px(1.6f) : 1f);
+            g.DrawPath(pen, path);
         }
 
-        // Key caps, right-aligned
-        float x = Width - Px(20);
-        float capH = Px(24);
-        float y = (Height - capH) / 2f;
-        for (int i = _keys.Length - 1; i >= 0; i--)
+        float cy = Height / 2f;
+        using var hintFont = new Font(Theme.FontFamily, 8.75f);
+        var flags = TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine
+                  | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis;
+        var textRect = new Rectangle(PxI(10), 0, Width - PxI(20), Height);
+
+        if (_error != null)
         {
-            var textSize = TextRenderer.MeasureText(g, _keys[i], keyFont, Size.Empty, flags);
-            float capW = Math.Max(capH, textSize.Width + Px(16));
-            x -= capW;
-            var cap = new RectangleF(x, y, capW, capH);
-            using (var capPath = Theme.RoundedRect(cap, Px(6)))
-            {
-                using var fill = new SolidBrush(Theme.SurfaceAlt);
-                g.FillPath(fill, capPath);
-                using var border = new Pen(Theme.BorderStrong, 1f);
-                g.DrawPath(border, capPath);
-            }
-            // Bottom edge gives the cap a little depth
-            using (var edge = new Pen(Theme.BorderStrong, Px(1.5f)))
-                g.DrawLine(edge, cap.X + Px(5), cap.Bottom, cap.Right - Px(5), cap.Bottom);
-
-            TextRenderer.DrawText(g, _keys[i], keyFont, Rectangle.Round(cap), Theme.Accent,
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
-
-            if (i > 0)
-            {
-                x -= Px(18);
-                TextRenderer.DrawText(g, "+", hintFont, new Rectangle((int)x, 0, PxI(18), Height), Theme.TextFaint,
-                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
-            }
+            TextRenderer.DrawText(g, _error, hintFont, textRect, Theme.Danger, flags);
+            return;
         }
+
+        if (_recording)
+        {
+            // Live preview of the modifiers being held
+            uint held = CurrentModifiers(ModifierKeys);
+            float x = Px(8);
+            if (held != 0)
+                x = KeyCaps.Draw(g, HotkeyManager.DescribeKeys(held, Keys.None), x, cy, Scale96, Theme.Accent, Theme.Accent) + Px(8);
+            TextRenderer.DrawText(g, held == 0 ? "Press a key combination…" : "+ key…", hintFont,
+                new Rectangle((int)x, 0, Width - (int)x - PxI(8), Height), Theme.Accent, flags);
+            return;
+        }
+
+        if (!HasBinding)
+        {
+            TextRenderer.DrawText(g, "Not set — click to record", hintFont, textRect, Theme.TextFaint, flags);
+            return;
+        }
+
+        KeyCaps.Draw(g, HotkeyManager.DescribeKeys(_modifiers, _key), Px(8), cy, Scale96,
+            _unavailable ? Theme.Danger : Theme.Accent, _unavailable ? Theme.Danger : Theme.BorderStrong);
+
+        if (_hover)
+        {
+            // Clear button
+            var c = ClearRect;
+            float r = Px(9);
+            var circle = new RectangleF(c.X + (c.Width - 2 * r) / 2, cy - r, 2 * r, 2 * r);
+            using (var bg = new SolidBrush(_hoverClear ? Theme.Border : Theme.SurfaceAlt))
+                g.FillEllipse(bg, circle);
+            using var xPen = new Pen(_hoverClear ? Theme.Text : Theme.TextMuted, Px(1.4f));
+            float d = Px(3.5f);
+            float mx = circle.X + r, my = circle.Y + r;
+            g.DrawLine(xPen, mx - d, my - d, mx + d, my + d);
+            g.DrawLine(xPen, mx + d, my - d, mx - d, my + d);
+        }
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _errorTimer.Dispose();
+            _tip.Dispose();
+        }
+        base.Dispose(disposing);
     }
 }
 
