@@ -22,12 +22,12 @@ internal interface IGlassSurface
 
 /// <summary>
 /// "Liquid glass" for the settings window, built from the desktop wallpaper the way Windows'
-/// Mica is: the wallpaper under the window, blurred heavily and washed toward white.
+/// Mica is: the wallpaper under the window, blurred heavily and washed toward dark gray.
 ///
 /// Two layers are pre-rendered at the window's client size, so every control copies exactly the
 /// pixels behind it (no seams between controls, no per-paint blurring):
-///   Base    — the window background (blurred wallpaper + light wash)
-///   Surface — Base plus the white wash of a glass panel (cards, sidebar)
+///   Base    — the window background (blurred wallpaper + dark gray wash)
+///   Surface — Base plus the faint white wash of a glass panel (cards, sidebar)
 /// Rebuilt when the window is shown, moved, resized or the wallpaper changes.
 /// </summary>
 internal sealed class GlassBackdrop : IDisposable
@@ -63,9 +63,9 @@ internal sealed class GlassBackdrop : IDisposable
             }
             else
             {
-                // No wallpaper available: a calm blue-gray field
+                // No wallpaper available: a calm graphite field
                 using var grad = new LinearGradientBrush(new Rectangle(0, 0, client.Width, client.Height),
-                    Color.FromArgb(178, 205, 236), Color.FromArgb(214, 226, 242), 35f);
+                    Color.FromArgb(58, 60, 64), Color.FromArgb(42, 43, 46), 35f);
                 g.FillRectangle(grad, 0, 0, client.Width, client.Height);
             }
             using var wash = new SolidBrush(Glass.WindowWash);
@@ -108,21 +108,21 @@ internal sealed class GlassBackdrop : IDisposable
 
 internal static class Glass
 {
-    /// <summary>Wash over the wallpaper for the window background: keeps any wallpaper light and calm.</summary>
-    public static readonly Color WindowWash = Color.FromArgb(176, 244, 247, 251);
+    /// <summary>Wash over the wallpaper for the window background: keeps any wallpaper dark and calm.</summary>
+    public static readonly Color WindowWash = Color.FromArgb(200, 40, 41, 44);
 
     /// <summary>Extra wash of a glass panel (card, sidebar) over the window background.</summary>
-    public static readonly Color SurfaceWash = Color.FromArgb(150, 255, 255, 255);
+    public static readonly Color SurfaceWash = Color.FromArgb(13, 255, 255, 255);
 
     /// <summary>Bright rim along the top edge of glass, as if lit from above.</summary>
-    public static readonly Color RimTop = Color.FromArgb(235, 255, 255, 255);
-    public static readonly Color RimBottom = Color.FromArgb(120, 255, 255, 255);
+    public static readonly Color RimTop = Color.FromArgb(22, 255, 255, 255);
+    public static readonly Color RimBottom = Color.FromArgb(6, 255, 255, 255);
 
-    /// <summary>Faint dark outline so glass edges read on light wallpapers.</summary>
-    public static readonly Color Hairline = Color.FromArgb(26, 15, 23, 42);
+    /// <summary>Faint light outline so glass edges read on dark glass.</summary>
+    public static readonly Color Hairline = Color.FromArgb(23, 255, 255, 255);
 
     /// <summary>Divider between rows inside a card.</summary>
-    public static readonly Color Divider = Color.FromArgb(20, 15, 23, 42);
+    public static readonly Color Divider = Color.FromArgb(15, 255, 255, 255);
 
     // --- Painting helpers ---
 
@@ -514,7 +514,7 @@ internal sealed class GlassScrollPanel : GlassPanel
             float w = _hover || _dragging ? Width * 0.7f : Width * 0.45f;
             var r = new RectangleF((Width - w) / 2f, thumb.Y + 1, w, thumb.Height - 2);
             using var path = Theme.RoundedRect(r, w / 2f);
-            using var brush = new SolidBrush(Color.FromArgb(_hover || _dragging ? 110 : 70, 15, 23, 42));
+            using var brush = new SolidBrush(Theme.Overlay(_hover || _dragging ? 90 : 50));
             g.FillPath(brush, path);
         }
     }

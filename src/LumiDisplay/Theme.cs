@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
@@ -76,26 +77,56 @@ internal static class UiFonts
 }
 
 /// <summary>
-/// LumiDisplay light palette: white and soft-gray surfaces with a dark blue accent.
+/// LumiDisplay dark gray glass palette with a light gray accent.
 /// Shared by the settings window, tray menu, OSD and the application icon.
 /// </summary>
 internal static class Theme
 {
-    public static readonly Color Window = Color.FromArgb(244, 246, 250);        // #F4F6FA page background
-    public static readonly Color Surface = Color.White;                         // cards, sidebar, menus
-    public static readonly Color SurfaceAlt = Color.FromArgb(241, 245, 249);    // #F1F5F9 hover / tiles
-    public static readonly Color Border = Color.FromArgb(226, 232, 240);        // #E2E8F0
-    public static readonly Color BorderStrong = Color.FromArgb(203, 213, 225);  // #CBD5E1
-    public static readonly Color Text = Color.FromArgb(15, 23, 42);             // #0F172A
-    public static readonly Color TextSecondary = Color.FromArgb(51, 65, 85);    // #334155
-    public static readonly Color TextMuted = Color.FromArgb(100, 116, 139);     // #64748B
-    public static readonly Color TextFaint = Color.FromArgb(148, 163, 184);     // #94A3B8
-    public static readonly Color Accent = Color.FromArgb(30, 58, 138);          // #1E3A8A dark blue
-    public static readonly Color AccentHover = Color.FromArgb(30, 64, 175);     // #1E40AF
-    public static readonly Color AccentPressed = Color.FromArgb(23, 37, 84);    // #172554
-    public static readonly Color AccentSoft = Color.FromArgb(234, 239, 250);    // #EAEFFA accent tint
-    public static readonly Color Danger = Color.FromArgb(220, 38, 38);          // #DC2626
-    public static readonly Color Success = Color.FromArgb(22, 163, 74);         // #16A34A
+    public static readonly Color Window = Color.FromArgb(42, 43, 46);           // #2A2B2E page background
+    public static readonly Color Surface = Color.FromArgb(51, 52, 55);          // #333437 cards, sidebar, menus
+    public static readonly Color SurfaceAlt = Color.FromArgb(59, 60, 64);       // #3B3C40 hover / tiles
+    public static readonly Color Border = Color.FromArgb(63, 64, 68);           // #3F4044
+    public static readonly Color BorderStrong = Color.FromArgb(85, 86, 91);     // #55565B
+    public static readonly Color Text = Color.FromArgb(236, 236, 238);          // #ECECEE
+    public static readonly Color TextSecondary = Color.FromArgb(201, 202, 206); // #C9CACE
+    public static readonly Color TextMuted = Color.FromArgb(163, 164, 169);     // #A3A4A9
+    public static readonly Color TextFaint = Color.FromArgb(142, 143, 149);     // #8E8F95
+    public static readonly Color Accent = Color.FromArgb(236, 236, 238);        // #ECECEE light gray
+    public static readonly Color AccentHover = Color.White;                     // #FFFFFF
+    public static readonly Color AccentPressed = Color.FromArgb(201, 202, 206); // #C9CACE
+    public static readonly Color AccentSoft = Color.FromArgb(59, 60, 64);       // #3B3C40 accent tint
+    public static readonly Color OnAccent = Color.FromArgb(38, 39, 42);         // #26272A text/glyphs on Accent
+    public static readonly Color Danger = Color.FromArgb(248, 113, 113);        // #F87171
+    public static readonly Color Success = Color.FromArgb(74, 222, 128);        // #4ADE80
+
+    /// <summary>White at <paramref name="alpha"/>: hover, tracks and fills on dark glass.</summary>
+    public static Color Overlay(int alpha) => Color.FromArgb(Math.Clamp(alpha, 0, 255), 255, 255, 255);
+
+    /// <summary>Black at <paramref name="alpha"/>: drop shadows.</summary>
+    public static Color Shadow(int alpha) => Color.FromArgb(Math.Clamp(alpha, 0, 255), 0, 0, 0);
+
+    /// <summary>WCAG 2.x contrast ratio between two opaque colors (1 to 21).</summary>
+    public static double ContrastRatio(Color fg, Color bg)
+    {
+        static double Lum(Color c)
+        {
+            static double Ch(int v) { double x = v / 255.0; return x <= 0.04045 ? x / 12.92 : Math.Pow((x + 0.055) / 1.055, 2.4); }
+            return 0.2126 * Ch(c.R) + 0.7152 * Ch(c.G) + 0.0722 * Ch(c.B);
+        }
+        double a = Lum(fg), b = Lum(bg);
+        return (Math.Max(a, b) + 0.05) / (Math.Min(a, b) + 0.05);
+    }
+
+    /// <summary>Debug self-check: text stays readable on the dark palette.</summary>
+    public static void SelfCheck()
+    {
+        Debug.Assert(Math.Abs(ContrastRatio(Color.White, Color.Black) - 21.0) < 0.01);
+        Debug.Assert(ContrastRatio(Text, Surface) >= 7.0);
+        Debug.Assert(ContrastRatio(TextSecondary, Surface) >= 4.5);
+        Debug.Assert(ContrastRatio(TextMuted, Surface) >= 4.5);
+        Debug.Assert(ContrastRatio(OnAccent, Accent) >= 7.0);
+        Debug.Assert(ContrastRatio(Text, Window) >= 7.0);
+    }
 
     /// <summary>Corner radius (96-DPI px) for cards, buttons, inputs, list items and the OSD.</summary>
     public const float Radius = 12f;

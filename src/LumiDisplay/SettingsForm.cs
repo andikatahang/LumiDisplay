@@ -16,6 +16,7 @@ public sealed class SettingsForm : Form, IGlassHost
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
 
     private const int DWMWA_BORDER_COLOR = 34;
+    private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
     private const int DWMWA_CAPTION_COLOR = 35;
     private const int DWMWA_TEXT_COLOR = 36;
 
@@ -73,7 +74,9 @@ public sealed class SettingsForm : Form, IGlassHost
         {
             int caption = ColorTranslator.ToWin32(_backdrop.TopColor);
             int text = ColorTranslator.ToWin32(Theme.Text);
-            int border = ColorTranslator.ToWin32(Color.FromArgb(200, 208, 220));
+            int border = ColorTranslator.ToWin32(Theme.Border);
+            int dark = 1;
+            DwmSetWindowAttribute(Handle, DWMWA_USE_IMMERSIVE_DARK_MODE, ref dark, sizeof(int));
             DwmSetWindowAttribute(Handle, DWMWA_CAPTION_COLOR, ref caption, sizeof(int));
             DwmSetWindowAttribute(Handle, DWMWA_TEXT_COLOR, ref text, sizeof(int));
             DwmSetWindowAttribute(Handle, DWMWA_BORDER_COLOR, ref border, sizeof(int));
