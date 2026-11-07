@@ -98,19 +98,19 @@ public sealed class OsdOverlay : IDisposable
         private readonly System.Windows.Forms.Timer _fadeTimer;
 
         // Layout in 96-DPI px (scaled at runtime)
-        private const float CardWidth = 320;
+        private const float CardWidth = 360;
         private const float CardHeight = 56;
         private const float ShadowMargin = 18;        // room for the drop shadow around the card
         private const float TrackHeight = 28;
         private const float TrackInsetLeft = 44;
-        private const float TrackInsetRight = 48;
+        private const float TrackInsetRight = 88;    // large icon + the value label
 
-        // Palette taken from the reference: glass, medium blue fill, lighter blue knob, gray icons
-        private static readonly Color FillTop = Color.FromArgb(38, 132, 214);    // #2684D6
-        private static readonly Color FillBottom = Color.FromArgb(28, 113, 196); // #1C71C4
-        private static readonly Color Knob = Color.FromArgb(112, 172, 232);      // #70ACE8
-        private static readonly Color IconColor = Color.FromArgb(82, 92, 108);   // #525C6C
-        private static readonly Color MutedFill = Color.FromArgb(164, 172, 185);
+        // Dark gray glass, gray fill, light glass knob, light gray icons
+        private static readonly Color FillTop = Color.FromArgb(169, 170, 175);    // #A9AAAF
+        private static readonly Color FillBottom = Color.FromArgb(139, 140, 146); // #8B8C92
+        private static readonly Color Knob = Color.FromArgb(140, 230, 231, 234);  // #E6E7EA, translucent
+        private static readonly Color IconColor = Color.FromArgb(201, 202, 206);  // #C9CACE
+        private static readonly Color MutedFill = Color.FromArgb(94, 95, 100);    // #5E5F64
 
         public OsdForm()
         {
@@ -255,7 +255,7 @@ public sealed class OsdOverlay : IDisposable
             float s = DeviceDpi / 96.0f;
             float m = ShadowMargin * s;
             var card = new RectangleF(m, m, CardWidth * s, CardHeight * s);
-            float radius = Theme.Radius * s;
+            float radius = card.Height / 2f; // pill
 
             // Soft drop shadow, offset downward
             for (int i = (int)m; i >= 1; i--)
@@ -263,33 +263,31 @@ public sealed class OsdOverlay : IDisposable
                 var r = RectangleF.Inflate(card, i * 0.8f, i * 0.8f);
                 r.Offset(0, 4 * s);
                 using var sp = Theme.RoundedRect(r, radius + i * 0.8f);
-                using var sb = new SolidBrush(Color.FromArgb(Math.Max(1, 34 / (int)m), 15, 23, 42));
+                using var sb = new SolidBrush(Theme.Shadow(Math.Max(1, 60 / (int)m)));
                 g.FillPath(sb, sp);
             }
 
             using var cardPath = Theme.RoundedRect(card, radius);
 
-            // Frosted glass: the blurred screen behind, washed with white, with a light sheen on top
+            // Frosted glass: the blurred screen behind, washed with dark gray
             if (_backdrop != null)
             {
                 using var glass = new TextureBrush(_backdrop, WrapMode.Clamp);
                 g.FillPath(glass, cardPath);
-                using var wash = new SolidBrush(Color.FromArgb(88, 255, 255, 255));
+                using var wash = new SolidBrush(Color.FromArgb(150, 40, 41, 44));
                 g.FillPath(wash, cardPath);
             }
             else
             {
-                using var plain = new SolidBrush(Color.FromArgb(232, 240, 245, 252));
+                using var plain = new SolidBrush(Color.FromArgb(240, 44, 45, 48));
                 g.FillPath(plain, cardPath);
             }
-            using (var sheen = new LinearGradientBrush(card, Color.FromArgb(70, 255, 255, 255), Color.FromArgb(0, 255, 255, 255), LinearGradientMode.Vertical))
-                g.FillPath(sheen, cardPath);
 
-            // Edges: a bright inner rim (lit from above) and a faint outer line so it reads on white
-            using (var outer = new Pen(Color.FromArgb(34, 15, 23, 42), 1f))
+            // Edges: a soft inner rim (lit from above) and a dark outer line so it reads on light backgrounds
+            using (var outer = new Pen(Theme.Shadow(60), 1f))
             using (var outerPath = Theme.RoundedRect(RectangleF.Inflate(card, 0.5f, 0.5f), radius + 0.5f))
                 g.DrawPath(outer, outerPath);
-            using (var rimBrush = new LinearGradientBrush(card, Color.FromArgb(220, 255, 255, 255), Color.FromArgb(90, 255, 255, 255), LinearGradientMode.Vertical))
+            using (var rimBrush = new LinearGradientBrush(card, Theme.Overlay(56), Theme.Overlay(12), LinearGradientMode.Vertical))
             using (var rim = new Pen(rimBrush, Math.Max(1f, s)))
             using (var rimPath = Theme.RoundedRect(RectangleF.Inflate(card, -0.5f * s, -0.5f * s), radius - 0.5f * s))
                 g.DrawPath(rim, rimPath);
@@ -297,7 +295,7 @@ public sealed class OsdOverlay : IDisposable
             // Icons: small on the left, large on the right
             float cy = card.Y + card.Height / 2f;
             var leftIcon = new RectangleF(card.X + 15 * s, cy - 8 * s, 16 * s, 16 * s);
-            var rightIcon = new RectangleF(card.Right - 15 * s - 22 * s, cy - 11 * s, 22 * s, 22 * s);
+            var rightIcon = new RectangleF(card.Right - 56 * s - 22 * s, cy - 11 * s, 22 * s, 22 * s);
             using (var iconBrush = new SolidBrush(IconColor))
             using (var iconPen = new Pen(IconColor, 1.8f * s) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round })
             {
@@ -323,10 +321,8 @@ public sealed class OsdOverlay : IDisposable
             var track = new RectangleF(card.X + TrackInsetLeft * s, cy - th / 2f, card.Width - (TrackInsetLeft + TrackInsetRight) * s, th);
             using (var trackPath = Theme.RoundedRect(track, th / 2f))
             {
-                using var trackBrush = new SolidBrush(Color.FromArgb(120, 255, 255, 255));
+                using var trackBrush = new SolidBrush(Theme.Overlay(26));
                 g.FillPath(trackBrush, trackPath);
-                using var inset = new Pen(Color.FromArgb(18, 15, 23, 42), 1f);
-                g.DrawPath(inset, trackPath);
             }
 
             // Fill + knob: the knob sits at the end of the fill and never leaves the track
@@ -343,9 +339,9 @@ public sealed class OsdOverlay : IDisposable
             }
 
             var knob = new RectangleF(knobX - th / 2f, track.Y, th, th);
-            using (var knobShadow = new SolidBrush(Color.FromArgb(46, 15, 23, 42)))
+            using (var knobShadow = new SolidBrush(Theme.Shadow(80)))
                 g.FillEllipse(knobShadow, knob.X, knob.Y + 1.5f * s, knob.Width, knob.Height);
-            using (var knobBrush = new SolidBrush(_muted ? Color.FromArgb(205, 210, 218) : Knob))
+            using (var knobBrush = new SolidBrush(_muted ? Color.FromArgb(140, 120, 121, 126) : Knob))
                 g.FillEllipse(knobBrush, knob);
             using (var knobPath = new GraphicsPath())
             {
@@ -358,8 +354,16 @@ public sealed class OsdOverlay : IDisposable
                 };
                 g.FillEllipse(highlight, knob);
             }
-            using (var knobRim = new Pen(Color.FromArgb(150, 255, 255, 255), Math.Max(1f, s)))
+            using (var knobRim = new Pen(Theme.Overlay(140), Math.Max(1f, s)))
                 g.DrawEllipse(knobRim, RectangleF.Inflate(knob, -0.5f * s, -0.5f * s));
+
+            // Value, right-aligned at the end of the pill
+            using var valueFont = Theme.SemiboldFont(10f);
+            using var valueBrush = new SolidBrush(_muted ? Theme.TextMuted : Theme.Text);
+            using var valueFormat = new StringFormat { Alignment = StringAlignment.Far, LineAlignment = StringAlignment.Center };
+            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+            g.DrawString(Math.Round(Math.Clamp(_fraction, 0, 1) * 100).ToString("0"), valueFont, valueBrush,
+                new RectangleF(card.Right - 52 * s, card.Y, 36 * s, card.Height), valueFormat);
         }
 
         // --- Icons (filled, in the style of the reference) ---
