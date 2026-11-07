@@ -24,7 +24,7 @@ internal interface IGlassSurface
 ///
 /// Two layers are pre-rendered at the window's client size, so every control copies exactly the
 /// pixels behind it (no seams between controls, no per-paint blurring):
-///   Base    — the window background (the image, lightly washed so it shows between the panels)
+///   Base    — the window background (the image, slightly blurred and lightly washed so it shows between the panels)
 ///   Surface — the image blurred and washed dark enough for text, plus the faint white wash of a
 ///             glass panel (cards, sidebar)
 /// Rebuilt when the window is shown, resized or its DPI changes.
@@ -48,7 +48,10 @@ internal sealed class GlassBackdrop : IDisposable
         using (var g = Graphics.FromImage(baseLayer))
         {
             if (image != null)
-                g.DrawImageUnscaled(image, 0, 0);
+            {
+                using var soft = Glass.Blur(image, 3); // just a touch softer than the image itself
+                g.DrawImageUnscaled(soft, 0, 0);
+            }
             else
             {
                 // Image missing: a calm graphite field
