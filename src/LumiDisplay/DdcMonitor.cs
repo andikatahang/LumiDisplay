@@ -29,6 +29,11 @@ public sealed class DdcMonitor : IMonitor
     private const int CommandGapMs = 50;
     private const int Attempts = 3;
 
+    // Last known value per VCP code, so a burst of key presses skips the slow read before each write.
+    // shortcut: a change made with the monitor's own buttons shows up only after CacheMs of no use; fine for key bursts.
+    private const int CacheMs = 3000;
+    private readonly Dictionary<byte, (uint current, uint max, long at)> _cache = new();
+
     private readonly IntPtr _physicalMonitor;
     private readonly string _description;
     private readonly object _io = new();
@@ -107,6 +112,10 @@ public sealed class DdcMonitor : IMonitor
     {
         lock (_io)
         {
+            if (_cache.TryGetValue(vcpCode, out var hit)
+                && System.Diagnostics.Stopwatch.GetElapsedTime(hit.at).TotalMilliseconds < CacheMs)
+                return (hit.current, hit.max);
+
             for (int attempt = 0; attempt < Attempts; attempt++)
             {
                 if (_disposed) throw new ObjectDisposedException(nameof(DdcMonitor));
@@ -114,7 +123,11 @@ public sealed class DdcMonitor : IMonitor
                 bool ok = NativeMethods.GetVCPFeatureAndVCPFeatureReply(
                     _physicalMonitor, vcpCode, out _, out uint currentValue, out uint maxValue);
                 _lastCommandTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
-                if (ok) return (currentValue, maxValue);
+                if (ok)
+                {
+                    _cache[vcpCode] = (currentValue, maxValue, _lastCommandTimestamp);
+                    return (currentValue, maxValue);
+                }
             }
             return null;
         }
@@ -133,8 +146,14 @@ public sealed class DdcMonitor : IMonitor
                 WaitForBus();
                 bool ok = NativeMethods.SetVCPFeature(_physicalMonitor, vcpCode, value);
                 _lastCommandTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
-                if (ok) return true;
+                if (ok)
+                {
+                    if (_cache.TryGetValue(vcpCode, out var known))
+                        _cache[vcpCode] = (value, known.max, _lastCommandTimestamp);
+                    return true;
+                }
             }
+            _cache.Remove(vcpCode); // the monitor's state is unknown now
             return false;
         }
     }

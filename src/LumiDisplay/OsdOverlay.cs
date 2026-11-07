@@ -101,7 +101,7 @@ public sealed class OsdOverlay : IDisposable
         private readonly System.Diagnostics.Stopwatch _glideClock = new();
 
         // Glide time constant: ~95% of the way to a new value in 3 × this
-        private const double GlideTauMs = 70;
+        private const double GlideTauMs = 40;
 
         // Layout in 96-DPI px (scaled at runtime)
         private const float CardWidth = 360;
@@ -378,7 +378,7 @@ public sealed class OsdOverlay : IDisposable
             using var valueBrush = new SolidBrush(_muted ? Theme.TextMuted : Theme.Text);
             using var valueFormat = new StringFormat { Alignment = StringAlignment.Far, LineAlignment = StringAlignment.Center };
             g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
-            g.DrawString(Math.Round(Math.Clamp(_shown, 0, 1) * 100).ToString("0"), valueFont, valueBrush,
+            g.DrawString(Math.Round(Math.Clamp(_fraction, 0, 1) * 100).ToString("0"), valueFont, valueBrush,
                 new RectangleF(card.Right - 52 * s, card.Y, 36 * s, card.Height), valueFormat);
         }
 

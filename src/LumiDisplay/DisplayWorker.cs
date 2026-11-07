@@ -125,36 +125,33 @@ public sealed class DisplayWorker : IDisposable
     {
         switch (job)
         {
+            // The OSD is shown as soon as the new value is known, before the slow DDC/CI write
             case StepJob s:
             {
-                DisplayControl.Change? last = null;
+                Action<double>? announce = s.ShowOsd ? pct => ShowOsd(s.Control, pct) : null;
                 foreach (var m in s.Targets)
                 {
-                    var change = s.Control switch
+                    _ = s.Control switch
                     {
-                        Control.Brightness => DisplayControl.StepBrightness(m, s.StepPercent, s.Steps, s.Sync),
-                        Control.Contrast => DisplayControl.StepContrast(m, s.StepPercent, s.Steps),
-                        _ => DisplayControl.StepVolume(m, s.StepPercent, s.Steps)
+                        Control.Brightness => DisplayControl.StepBrightness(m, s.StepPercent, s.Steps, s.Sync, announce),
+                        Control.Contrast => DisplayControl.StepContrast(m, s.StepPercent, s.Steps, announce),
+                        _ => DisplayControl.StepVolume(m, s.StepPercent, s.Steps, announce)
                     };
-                    last = change ?? last;
                 }
-                if (last != null && s.ShowOsd) ShowOsd(s.Control, last.Value.NewPercent);
                 break;
             }
             case SetJob set:
             {
-                DisplayControl.Change? last = null;
+                Action<double>? announce = set.ShowOsd ? pct => ShowOsd(set.Control, pct) : null;
                 foreach (var m in set.Targets)
                 {
-                    var change = set.Control switch
+                    _ = set.Control switch
                     {
-                        Control.Brightness => DisplayControl.SetBrightnessPercent(m, set.Percent, set.Sync),
-                        Control.Contrast => DisplayControl.SetContrastPercent(m, set.Percent),
-                        _ => DisplayControl.SetVolumePercent(m, set.Percent)
+                        Control.Brightness => DisplayControl.SetBrightnessPercent(m, set.Percent, set.Sync, announce),
+                        Control.Contrast => DisplayControl.SetContrastPercent(m, set.Percent, announce),
+                        _ => DisplayControl.SetVolumePercent(m, set.Percent, announce)
                     };
-                    last = change ?? last;
                 }
-                if (last != null && set.ShowOsd) ShowOsd(set.Control, last.Value.NewPercent);
                 break;
             }
             case MuteJob mute:
