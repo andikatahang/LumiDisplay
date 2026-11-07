@@ -126,6 +126,13 @@ internal static class Theme
         Debug.Assert(ContrastRatio(TextMuted, Surface) >= 4.5);
         Debug.Assert(ContrastRatio(OnAccent, Accent) >= 7.0);
         Debug.Assert(ContrastRatio(Text, Window) >= 7.0);
+
+        // Worst case: a white wallpaper (or white window behind the OSD) under the densest wash
+        static Color Over(Color top, int alpha, Color under) => Blend(under, Color.FromArgb(255, top), alpha / 255f);
+        var panelOnWhite = Over(Color.White, Glass.SurfaceWash.A, Over(Glass.WindowWash, Glass.WindowWashAlphaBright, Color.White));
+        Debug.Assert(ContrastRatio(TextMuted, panelOnWhite) >= 4.5);
+        var osdOnWhite = Over(Color.FromArgb(44, 45, 48), Glass.OsdWashAlphaBright, Color.White);
+        Debug.Assert(ContrastRatio(Text, osdOnWhite) >= 4.5);
     }
 
     /// <summary>Corner radius (96-DPI px) for cards, buttons, inputs, list items and the OSD.</summary>

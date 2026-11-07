@@ -68,7 +68,8 @@ internal sealed class GlassBackdrop : IDisposable
                     Color.FromArgb(58, 60, 64), Color.FromArgb(42, 43, 46), 35f);
                 g.FillRectangle(grad, 0, 0, client.Width, client.Height);
             }
-            using var wash = new SolidBrush(Glass.WindowWash);
+            int alpha = Glass.AdaptiveWashAlpha(baseLayer, Glass.WindowWashAlpha, Glass.WindowWashAlphaBright);
+            using var wash = new SolidBrush(Color.FromArgb(alpha, Glass.WindowWash));
             g.FillRectangle(wash, 0, 0, client.Width, client.Height);
         }
 
@@ -110,6 +111,29 @@ internal static class Glass
 {
     /// <summary>Wash over the wallpaper for the window background: keeps any wallpaper dark and calm.</summary>
     public static readonly Color WindowWash = Color.FromArgb(200, 40, 41, 44);
+
+    /// <summary>Wash alphas for the settings window and OSD; bright backgrounds get the denser one so text stays readable.</summary>
+    public const int WindowWashAlpha = 200, WindowWashAlphaBright = 245;
+    public const int OsdWashAlpha = 150, OsdWashAlphaBright = 225;
+
+    /// <summary>
+    /// Wash alpha for a background: <paramref name="normal"/> for mid/dark backgrounds, rising to
+    /// <paramref name="bright"/> as the mean luminance of <paramref name="bmp"/> approaches white.
+    /// </summary>
+    public static int AdaptiveWashAlpha(Bitmap bmp, int normal, int bright)
+    {
+        double sum = 0;
+        int n = 0;
+        for (int y = 0; y < bmp.Height; y += 8)
+            for (int x = 0; x < bmp.Width; x += 8)
+            {
+                var c = bmp.GetPixel(x, y);
+                sum += (0.2126 * c.R + 0.7152 * c.G + 0.0722 * c.B) / 255.0;
+                n++;
+            }
+        double t = n == 0 ? 0 : Math.Clamp((sum / n - 0.4) / 0.45, 0, 1);
+        return (int)Math.Round(normal + (bright - normal) * t);
+    }
 
     /// <summary>Extra wash of a glass panel (card, sidebar) over the window background.</summary>
     public static readonly Color SurfaceWash = Color.FromArgb(13, 255, 255, 255);

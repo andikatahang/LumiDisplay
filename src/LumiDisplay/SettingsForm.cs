@@ -22,6 +22,8 @@ public sealed class SettingsForm : Form, IGlassHost
     [System.Runtime.InteropServices.DllImport("uxtheme.dll", EntryPoint = "#135")]
     private static extern int SetPreferredAppMode(int mode);
 
+    private static bool _darkAppMode;
+
     private const int DWMWA_BORDER_COLOR = 34;
     private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
     private const int DWMWA_CAPTION_COLOR = 35;
@@ -863,12 +865,14 @@ public sealed class SettingsForm : Form, IGlassHost
         // Windows' dark combo theme: dark frame, arrow and dropdown list instead of the light flat border
         _cboTargetMonitor.HandleCreated += (_, _) =>
         {
+            // #135 only means SetPreferredAppMode from Windows 10 1903 (build 18362); older builds keep the light frame
+            if (Environment.OSVersion.Version.Build < 18362) return;
             try
             {
-                SetPreferredAppMode(2);
+                if (!_darkAppMode) { SetPreferredAppMode(2); _darkAppMode = true; }
                 SetWindowTheme(_cboTargetMonitor.Handle, "DarkMode_CFD", null);
             }
-            catch { } // older Windows: keeps the light combo frame
+            catch { }
         };
         _cboTargetMonitor.SelectedIndexChanged += (_, _) => UpdateMonitorDetails();
         _cboTargetMonitor.GotFocus += (_, _) => comboHost.Invalidate();

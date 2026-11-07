@@ -95,6 +95,7 @@ public sealed class OsdOverlay : IDisposable
         private byte _opacity = 255;
         private Bitmap? _frame;
         private Bitmap? _backdrop;
+        private int _washAlpha = Glass.OsdWashAlpha;
         private readonly System.Windows.Forms.Timer _fadeTimer;
 
         // Layout in 96-DPI px (scaled at runtime)
@@ -207,6 +208,7 @@ public sealed class OsdOverlay : IDisposable
                 using (var g = Graphics.FromImage(shot))
                     g.CopyFromScreen(Location, Point.Empty, Size);
                 _backdrop = Blur(shot, DeviceDpi / 96.0f);
+                _washAlpha = Glass.AdaptiveWashAlpha(_backdrop, Glass.OsdWashAlpha, Glass.OsdWashAlphaBright);
             }
             catch
             {
@@ -274,7 +276,7 @@ public sealed class OsdOverlay : IDisposable
             {
                 using var glass = new TextureBrush(_backdrop, WrapMode.Clamp);
                 g.FillPath(glass, cardPath);
-                using var wash = new SolidBrush(Color.FromArgb(150, 40, 41, 44));
+                using var wash = new SolidBrush(Color.FromArgb(_washAlpha, 44, 45, 48));
                 g.FillPath(wash, cardPath);
             }
             else
@@ -357,7 +359,8 @@ public sealed class OsdOverlay : IDisposable
             using (var knobRim = new Pen(Theme.Overlay(140), Math.Max(1f, s)))
                 g.DrawEllipse(knobRim, RectangleF.Inflate(knob, -0.5f * s, -0.5f * s));
 
-            // Value, right-aligned at the end of the pill
+            // Value, right-aligned at the end of the pill (mute carries no level, so no number)
+            if (_type == OsdType.Mute) return;
             using var valueFont = Theme.SemiboldFont(10f);
             using var valueBrush = new SolidBrush(_muted ? Theme.TextMuted : Theme.Text);
             using var valueFormat = new StringFormat { Alignment = StringAlignment.Far, LineAlignment = StringAlignment.Center };
