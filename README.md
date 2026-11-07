@@ -14,8 +14,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/andikatahang/LumiDisplay/releases/latest"><img src="https://img.shields.io/github/v/release/andikatahang/LumiDisplay?color=1E3A8A&label=release" alt="Latest release"></a>
-  <img src="https://img.shields.io/badge/Windows-10%20%7C%2011%20(x64)-1E3A8A" alt="Windows 10 | 11">
+  <a href="https://github.com/andikatahang/LumiDisplay/releases/latest"><img src="https://img.shields.io/github/v/release/andikatahang/LumiDisplay?color=55565B&label=release" alt="Latest release"></a>
+  <img src="https://img.shields.io/badge/Windows-10%20%7C%2011%20(x64)-55565B" alt="Windows 10 | 11">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-64748B" alt="MIT license"></a>
 </p>
 
@@ -26,7 +26,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/hero.png" alt="LumiDisplay settings window, tray menu and brightness overlay" />
+  <img src="docs/images/hero.png" alt="LumiDisplay settings window and brightness overlay in dark glass" />
 </p>
 
 ## Features
@@ -36,7 +36,7 @@
 - **Keyboard shortcuts** for brightness (standard and fine steps) and contrast.
 - **Even 10% steps** for brightness, contrast and volume — every press lands on 10, 20, 30 … 100% (fine steps of 2% with Shift). Both sizes are adjustable.
 - **Sync contrast with brightness** (optional) — contrast moves along with brightness, while the contrast keys still adjust it on its own.
-- **On-screen display** in the macOS style, one segment per step, so you always see the current level.
+- **On-screen display** as a dark gray glass pill with a gray fill and the current level in percent.
 - **Lives in the system tray** — quick presets, per-monitor targeting, and it can start with Windows.
 - **Portable** — a single `.exe`, no installer, no .NET runtime to install.
 
@@ -154,7 +154,7 @@ Developer flags:
 | Volume keys | Low-level keyboard hook (`WH_KEYBOARD_LL`); Windows volume via Core Audio `IAudioEndpointVolume` on the default playback device | [`MediaKeyInterceptor.cs`](src/LumiDisplay/MediaKeyInterceptor.cs), [`AudioEndpoint.cs`](src/LumiDisplay/AudioEndpoint.cs) |
 | Shortcuts | `RegisterHotKey` | [`HotkeyManager.cs`](src/LumiDisplay/HotkeyManager.cs) |
 | On-screen display | Per-pixel-alpha layered window (`UpdateLayeredWindow`) | [`OsdOverlay.cs`](src/LumiDisplay/OsdOverlay.cs) |
-| UI | WinForms with custom-drawn controls, light theme | [`SettingsForm.cs`](src/LumiDisplay/SettingsForm.cs), [`ThemedControls.cs`](src/LumiDisplay/ThemedControls.cs), [`Theme.cs`](src/LumiDisplay/Theme.cs) |
+| UI | WinForms with custom-drawn controls, dark gray glass theme | [`SettingsForm.cs`](src/LumiDisplay/SettingsForm.cs), [`ThemedControls.cs`](src/LumiDisplay/ThemedControls.cs), [`Theme.cs`](src/LumiDisplay/Theme.cs) |
 | Settings | JSON in `%LocalAppData%\LumiDisplay\settings.json` | [`AppSettings.cs`](src/LumiDisplay/AppSettings.cs) |
 
 Stepping ([`DisplayControl.cs`](src/LumiDisplay/DisplayControl.cs)) works in percent on a grid: each press moves to the next multiple of the step (10% by default, 2% fine), so a value set elsewhere (say 63%) snaps to 70% going up or 60% going down. With *Sync contrast with brightness* on, contrast moves by the same number of points as brightness (never below 10% while syncing). This replaces BetterDisplay's 64-logical-step model, whose 6.25% steps gave uneven percentages.

@@ -14,8 +14,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/andikatahang/LumiDisplay/releases/latest"><img src="https://img.shields.io/github/v/release/andikatahang/LumiDisplay?color=1E3A8A&label=rilis" alt="Rilis terbaru"></a>
-  <img src="https://img.shields.io/badge/Windows-10%20%7C%2011%20(x64)-1E3A8A" alt="Windows 10 | 11">
+  <a href="https://github.com/andikatahang/LumiDisplay/releases/latest"><img src="https://img.shields.io/github/v/release/andikatahang/LumiDisplay?color=55565B&label=rilis" alt="Rilis terbaru"></a>
+  <img src="https://img.shields.io/badge/Windows-10%20%7C%2011%20(x64)-55565B" alt="Windows 10 | 11">
   <a href="LICENSE"><img src="https://img.shields.io/badge/lisensi-MIT-64748B" alt="Lisensi MIT"></a>
 </p>
 
@@ -26,7 +26,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/hero.png" alt="Jendela pengaturan LumiDisplay, menu tray, dan indikator kecerahan" />
+  <img src="docs/images/hero.png" alt="Jendela pengaturan LumiDisplay dan indikator kecerahan bergaya kaca gelap" />
 </p>
 
 ## Fitur
@@ -36,7 +36,7 @@
 - **Shortcut keyboard** untuk kecerahan (langkah normal dan halus) serta kontras.
 - **Langkah rata 10%** untuk kecerahan, kontras, dan volume — setiap tekan berhenti di 10, 20, 30 … 100% (langkah halus 2% dengan Shift). Kedua ukuran bisa diatur.
 - **Sinkronkan kontras dengan kecerahan** (opsional) — kontras ikut berubah bersama kecerahan, sementara tombol kontras tetap bisa mengaturnya sendiri.
-- **Indikator di layar (OSD)** bergaya macOS, satu kotak per langkah, jadi level saat ini selalu terlihat.
+- **Indikator di layar (OSD)** berupa pil kaca abu-abu gelap dengan isian abu-abu dan level saat ini dalam persen.
 - **Berjalan di system tray** — ada preset cepat, pilihan monitor yang dikontrol, dan bisa ikut menyala bersama Windows.
 - **Portabel** — cukup satu file `.exe`, tanpa installer, tanpa perlu memasang .NET.
 
@@ -154,7 +154,7 @@ Flag untuk developer:
 | Tombol volume | Hook keyboard tingkat rendah (`WH_KEYBOARD_LL`); volume Windows lewat Core Audio `IAudioEndpointVolume` pada perangkat audio bawaan | [`MediaKeyInterceptor.cs`](src/LumiDisplay/MediaKeyInterceptor.cs), [`AudioEndpoint.cs`](src/LumiDisplay/AudioEndpoint.cs) |
 | Shortcut | `RegisterHotKey` | [`HotkeyManager.cs`](src/LumiDisplay/HotkeyManager.cs) |
 | Indikator di layar | Layered window dengan alpha per piksel (`UpdateLayeredWindow`) | [`OsdOverlay.cs`](src/LumiDisplay/OsdOverlay.cs) |
-| Antarmuka | WinForms dengan kontrol yang digambar sendiri, tema terang | [`SettingsForm.cs`](src/LumiDisplay/SettingsForm.cs), [`ThemedControls.cs`](src/LumiDisplay/ThemedControls.cs), [`Theme.cs`](src/LumiDisplay/Theme.cs) |
+| Antarmuka | WinForms dengan kontrol yang digambar sendiri, tema kaca abu-abu gelap | [`SettingsForm.cs`](src/LumiDisplay/SettingsForm.cs), [`ThemedControls.cs`](src/LumiDisplay/ThemedControls.cs), [`Theme.cs`](src/LumiDisplay/Theme.cs) |
 | Pengaturan | JSON di `%LocalAppData%\LumiDisplay\settings.json` | [`AppSettings.cs`](src/LumiDisplay/AppSettings.cs) |
 
 Pembagian langkah ([`DisplayControl.cs`](src/LumiDisplay/DisplayControl.cs)) memakai persen pada sebuah grid: setiap tekan berpindah ke kelipatan langkah berikutnya (bawaan 10%, halus 2%), jadi nilai yang diatur dari tempat lain (misalnya 63%) akan dibulatkan ke 70% saat naik atau 60% saat turun. Kalau *Sync contrast with brightness* aktif, kontras bergeser sebanyak poin yang sama dengan kecerahan (tidak pernah di bawah 10% selama sinkron). Cara ini menggantikan model 64 langkah logis BetterDisplay yang langkah 6,25%-nya menghasilkan persentase tidak rata.
