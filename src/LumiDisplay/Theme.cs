@@ -307,8 +307,14 @@ internal static class Glyphs
 /// </summary>
 internal static class Logo
 {
-    private static readonly Color TileTop = Color.White;
-    private static readonly Color TileBottom = Color.FromArgb(241, 245, 249);   // #F1F5F9
+    // Own colors, not Theme.Accent*: the mark must stay legible whatever the UI accent is
+    private static readonly Color TileTop = Color.FromArgb(58, 59, 63);         // #3A3B3F graphite
+    private static readonly Color TileBottom = Color.FromArgb(38, 39, 42);      // #26272A
+    private static readonly Color TileBorder = Color.FromArgb(85, 86, 91);      // #55565B
+    private static readonly Color TileBorderSmall = Color.FromArgb(110, 111, 117); // #6E6F75, reads on dark taskbars
+    private static readonly Color Mark = Color.FromArgb(236, 236, 238);         // #ECECEE
+    private static readonly Color ScreenGlass = Color.FromArgb(74, 75, 80);     // #4A4B50
+    private static readonly Color Rays = Color.FromArgb(201, 202, 206);         // #C9CACE
 
     public static void Draw(Graphics g, RectangleF r)
     {
@@ -320,19 +326,19 @@ internal static class Logo
         bool tiny = s <= 20;
         bool small = s <= 40;
 
-        // White card tile with a hairline border (darker at small sizes so it reads on white)
+        // Graphite tile with a hairline border (stronger at small sizes so it reads on a dark taskbar)
         float borderW = Math.Max(1f, s * 0.018f);
         var tileRect = RectangleF.Inflate(r, -borderW / 2f, -borderW / 2f);
         using var tile = Theme.RoundedRect(tileRect, s * 0.225f);
         using (var grad = new LinearGradientBrush(RectangleF.Inflate(r, 0, 1), TileTop, TileBottom, LinearGradientMode.Vertical))
             g.FillPath(grad, tile);
-        using (var border = new Pen(s <= 24 ? Theme.TextFaint : Theme.BorderStrong, borderW))
+        using (var border = new Pen(s <= 24 ? TileBorderSmall : TileBorder, borderW))
             g.DrawPath(border, tile);
 
-        // Monitor: dark blue outline over a soft accent-tinted screen
+        // Monitor: light outline over a gray glass screen
         float stroke = Math.Max(1.3f, s * (tiny ? 0.095f : 0.066f));
         var screen = new RectangleF(r.X + s * 0.18f, r.Y + s * 0.21f, s * 0.64f, s * 0.45f);
-        using var pen = new Pen(Theme.Accent, stroke)
+        using var pen = new Pen(Mark, stroke)
         {
             StartCap = LineCap.Round,
             EndCap = LineCap.Round,
@@ -340,7 +346,7 @@ internal static class Logo
         };
         using (var screenPath = Theme.RoundedRect(screen, s * 0.075f))
         {
-            using var glass = new SolidBrush(Theme.AccentSoft);
+            using var glass = new SolidBrush(ScreenGlass);
             g.FillPath(glass, screenPath);
             g.DrawPath(pen, screenPath);
         }
@@ -352,12 +358,12 @@ internal static class Logo
         // Sun in the middle of the screen
         var c = new PointF(cx, screen.Y + screen.Height / 2f);
         float sunR = s * (tiny ? 0.1f : 0.078f);
-        using (var sun = new SolidBrush(Theme.Accent))
+        using (var sun = new SolidBrush(Mark))
             g.FillEllipse(sun, c.X - sunR, c.Y - sunR, sunR * 2, sunR * 2);
 
         if (!tiny)
         {
-            using var rayPen = new Pen(Theme.AccentHover, Math.Max(1f, s * 0.032f))
+            using var rayPen = new Pen(Rays, Math.Max(1f, s * 0.032f))
             {
                 StartCap = LineCap.Round,
                 EndCap = LineCap.Round
