@@ -299,6 +299,9 @@ internal sealed class Card : Panel, IGlassSurface
         Glass.PaintBehind(g, this);
         var rect = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
         Glass.PaintSurface(g, this, rect, Theme.Radius * s);
+        using (var pane = Theme.RoundedRect(rect, Theme.Radius * s))
+        using (var frost = new SolidBrush(Glass.CardFill))
+            g.FillPath(frost, pane);
 
         using var titleFont = Theme.MediumFont(10.5f);
         TextRenderer.DrawText(g, Title, titleFont, new Point((int)(20 * s), (int)(17 * s)), Theme.Text,
@@ -935,7 +938,8 @@ internal sealed class NavItem : ThemedControl
         TextRenderer.DrawText(g, Text, font, new Rectangle(textX, top, Width - textX - PxI(8), font.Height),
             _selected ? Theme.Text : Theme.TextSecondary, flags);
         TextRenderer.DrawText(g, _description, descFont,
-            new Rectangle(textX, top + font.Height + PxI(2), Width - textX - PxI(8), descFont.Height), Theme.TextMuted, flags);
+            new Rectangle(textX, top + font.Height + PxI(2), Width - textX - PxI(8), descFont.Height),
+            _selected || _hover ? Theme.TextSecondary : Theme.TextMuted, flags); // the item fill is too light for muted text
     }
 }
 
@@ -1016,7 +1020,7 @@ internal sealed class StatTile : ThemedControl
         using var valFont = Theme.MediumFont(11f);
         var flags = TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine;
         TextRenderer.DrawText(g, Caption.ToUpperInvariant(), capFont,
-            new Rectangle(PxI(12), PxI(10), Width - PxI(20), capFont.Height), Theme.TextMuted, flags);
+            new Rectangle(PxI(12), PxI(10), Width - PxI(20), capFont.Height), Theme.TextSecondary, flags); // on the tile fill
         TextRenderer.DrawText(g, _value, valFont,
             new Rectangle(PxI(12), PxI(28), Width - PxI(20), valFont.Height + 2),
             _value is "—" or "N/A" or "Not supported" or "No reply" ? Theme.TextFaint : Theme.Accent, flags);

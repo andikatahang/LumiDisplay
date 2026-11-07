@@ -129,9 +129,12 @@ internal static class Theme
 
         // Worst case: glass panels over white image pixels, or a white window behind the OSD
         static Color Over(Color top, int alpha, Color under) => Blend(under, Color.FromArgb(255, top), alpha / 255f);
-        var panelOnWhite = Glass.PanelOver(Color.White, Glass.SafeWashAlpha(Color.White));
-        Debug.Assert(ContrastRatio(TextMuted, panelOnWhite) >= 4.5);
-        Debug.Assert(Glass.SafeWashAlpha(Color.Black) == Glass.WindowWashAlpha);
+        for (int v = 0; v < 256; v++)
+            Debug.Assert(ContrastRatio(TextMuted, Glass.TopOfStack(Color.FromArgb(v, v, v), Glass.WashAlphaFor(v))) >= 4.5);
+        Debug.Assert(Glass.WashAlphaFor(0) == Glass.GlassWashMin);
+        // Selected list item (white 23 over the panel) carries secondary text
+        for (int v = 0; v < 256; v++)
+            Debug.Assert(ContrastRatio(TextSecondary, Blend(Glass.TopOfStack(Color.FromArgb(v, v, v), Glass.WashAlphaFor(v)), Color.White, 23 / 255f)) >= 4.5);
         var osdOnWhite = Over(Color.FromArgb(44, 45, 48), Glass.OsdWashAlphaBright, Color.White);
         Debug.Assert(ContrastRatio(Text, osdOnWhite) >= 4.5);
     }

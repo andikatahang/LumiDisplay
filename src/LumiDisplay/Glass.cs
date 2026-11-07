@@ -67,13 +67,10 @@ internal sealed class GlassBackdrop : IDisposable
         var surfaceLayer = image != null
             ? Glass.Blur(image, Math.Max(3, (int)Math.Round(4 * scale)))
             : new Bitmap(baseLayer);
+        Glass.Frost(surfaceLayer);
         using (var g = Graphics.FromImage(surfaceLayer))
-        {
-            using (var wash = new SolidBrush(Color.FromArgb(Glass.SafeWashAlpha(surfaceLayer), Glass.WindowWash)))
-                g.FillRectangle(wash, 0, 0, size.Width, size.Height);
-            using (var wash = new SolidBrush(Glass.SurfaceWash))
-                g.FillRectangle(wash, 0, 0, size.Width, size.Height);
-        }
+        using (var wash = new SolidBrush(Glass.SurfaceWash))
+            g.FillRectangle(wash, 0, 0, size.Width, size.Height);
 
         TopColor = AverageTop(surfaceLayer);
         Base?.Dispose();
@@ -112,8 +109,12 @@ internal static class Glass
     /// <summary>Wash over the background image between the glass panels (no text sits there).</summary>
     public const int BackgroundWashAlpha = 40;
 
-    /// <summary>Lightest wash a glass panel gets, even over a dark image.</summary>
-    public const int WindowWashAlpha = 200;
+    /// <summary>Lightest wash a glass panel gets: low, so the background shows through the glass.</summary>
+    public const int GlassWashMin = 70;
+
+    /// <summary>Frosted fill a card adds on top of its panel, so it reads as a second pane of glass.</summary>
+    /// Muted text sits only on a panel or card; on any further fill (tile, list item) text is secondary or brighter.
+    public static readonly Color CardFill = Color.FromArgb(8, 255, 255, 255);
 
     /// <summary>OSD wash alphas; bright backgrounds get the denser one so text stays readable.</summary>
     public const int OsdWashAlpha = 150, OsdWashAlphaBright = 225;
@@ -137,34 +138,65 @@ internal static class Glass
         return (int)Math.Round(normal + (bright - normal) * t);
     }
 
+    private static byte[]? _washTable;
+
     /// <summary>
-    /// Smallest wash alpha (at least <see cref="WindowWashAlpha"/>) that keeps muted text readable
-    /// (4.5:1) on a glass panel over the brightest pixel of <paramref name="bmp"/>.
+    /// Wash alpha for a backdrop pixel whose brightest channel is <paramref name="v"/>:
+    /// <see cref="GlassWashMin"/> where the backdrop is dark (the glass stays see-through), more where
+    /// it is bright, just enough that muted text stays 4.5:1 on the brightest stack it can sit on.
     /// </summary>
-    public static int SafeWashAlpha(Bitmap bmp)
+    public static int WashAlphaFor(int v)
     {
-        int max = 0;
-        for (int y = 0; y < bmp.Height; y += 2)
-            for (int x = 0; x < bmp.Width; x += 2)
+        if (_washTable == null)
+        {
+            var table = new byte[256];
+            for (int i = 0; i < 256; i++)
             {
-                var c = bmp.GetPixel(x, y);
-                max = Math.Max(max, Math.Max(c.R, Math.Max(c.G, c.B)));
+                int a = GlassWashMin;
+                while (a < 255 && Theme.ContrastRatio(Theme.TextMuted, TopOfStack(Color.FromArgb(i, i, i), a)) < 4.6) a++;
+                table[i] = (byte)a;
             }
-        return SafeWashAlpha(Color.FromArgb(max, max, max));
+            _washTable = table;
+        }
+        return _washTable[Math.Clamp(v, 0, 255)];
     }
 
-    public static int SafeWashAlpha(Color brightest)
+    /// <summary>
+    /// The brightest place muted text can sit on: the backdrop washed with <paramref name="alpha"/>,
+    /// then the panel wash and a card's fill.
+    /// </summary>
+    public static Color TopOfStack(Color under, int alpha)
     {
-        for (int a = WindowWashAlpha; a < 255; a++)
-            if (Theme.ContrastRatio(Theme.TextMuted, PanelOver(brightest, a)) >= 4.6) return a;
-        return 255;
+        var c = Theme.Blend(Color.FromArgb(255, under), Color.FromArgb(255, WindowWash), alpha / 255f);
+        c = Theme.Blend(c, Color.White, SurfaceWash.A / 255f);
+        return Theme.Blend(c, Color.White, CardFill.A / 255f);
     }
 
-    /// <summary>What a glass panel looks like over <paramref name="under"/> with a wash of <paramref name="alpha"/>.</summary>
-    public static Color PanelOver(Color under, int alpha)
+    /// <summary>Washes each pixel of <paramref name="bmp"/> toward dark gray by <see cref="WashAlphaFor"/> its brightness.</summary>
+    public static void Frost(Bitmap bmp)
     {
-        var washed = Theme.Blend(Color.FromArgb(255, under), Color.FromArgb(255, WindowWash), alpha / 255f);
-        return Theme.Blend(washed, Color.FromArgb(255, SurfaceWash), SurfaceWash.A / 255f);
+        var rect = new Rectangle(0, 0, bmp.Width, bmp.Height);
+        var data = bmp.LockBits(rect, ImageLockMode.ReadWrite, PixelFormat.Format32bppArgb);
+        try
+        {
+            var px = new byte[data.Stride * data.Height];
+            System.Runtime.InteropServices.Marshal.Copy(data.Scan0, px, 0, px.Length);
+            for (int y = 0; y < data.Height; y++)
+                for (int i = y * data.Stride, end = i + data.Width * 4; i < end; i += 4)
+                {
+                    // BGRA
+                    int a = WashAlphaFor(Math.Max(px[i], Math.Max(px[i + 1], px[i + 2])));
+                    px[i] = (byte)((px[i] * (255 - a) + WindowWash.B * a) / 255);
+                    px[i + 1] = (byte)((px[i + 1] * (255 - a) + WindowWash.G * a) / 255);
+                    px[i + 2] = (byte)((px[i + 2] * (255 - a) + WindowWash.R * a) / 255);
+                    px[i + 3] = 255;
+                }
+            System.Runtime.InteropServices.Marshal.Copy(px, 0, data.Scan0, px.Length);
+        }
+        finally
+        {
+            bmp.UnlockBits(data);
+        }
     }
 
     /// <summary>Extra wash of a glass panel (card, sidebar) over the window background.</summary>
@@ -202,6 +234,15 @@ internal static class Glass
         g.CompositingMode = CompositingMode.SourceCopy;
         g.DrawImage(layer, new Rectangle(0, 0, c.Width, c.Height), new Rectangle(origin, c.Size), GraphicsUnit.Pixel);
         g.Restore(state);
+
+        // Inside a card: the card's frosted fill is behind this control too
+        for (var p = c.Parent; p != null && p is not Form; p = p.Parent)
+            if (p is Card)
+            {
+                using var frost = new SolidBrush(CardFill);
+                g.FillRectangle(frost, 0, 0, c.Width, c.Height);
+                break;
+            }
     }
 
     /// <summary>

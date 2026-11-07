@@ -443,7 +443,7 @@ public sealed class SettingsForm : Form, IGlassHost
             Location = new Point(28, 32),
             AutoSize = true,
             Font = Theme.Font(8F),
-            ForeColor = Theme.TextMuted,
+            ForeColor = Theme.TextSecondary, // sits on the status fill, too light for muted text
             BackColor = Color.Transparent
         };
         status.Controls.Add(_lblMonitorStatus);
