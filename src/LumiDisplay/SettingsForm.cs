@@ -15,14 +15,20 @@ public sealed class SettingsForm : Form, IGlassHost
     [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
 
-    [System.Runtime.InteropServices.DllImport("uxtheme.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
-    private static extern int SetWindowTheme(IntPtr hwnd, string? appName, string? idList);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool GetComboBoxInfo(IntPtr hwnd, ref COMBOBOXINFO info);
 
-    // uxtheme #135 SetPreferredAppMode (undocumented, Windows 10 1903+): 2 = ForceDark, so common controls pick their dark theme
-    [System.Runtime.InteropServices.DllImport("uxtheme.dll", EntryPoint = "#135")]
-    private static extern int SetPreferredAppMode(int mode);
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct RECT { public int Left, Top, Right, Bottom; }
 
-    private static bool _darkAppMode;
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct COMBOBOXINFO
+    {
+        public int cbSize;
+        public RECT rcItem, rcButton;
+        public int stateButton;
+        public IntPtr hwndCombo, hwndItem, hwndList;
+    }
 
     private const int DWMWA_BORDER_COLOR = 34;
     private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
@@ -819,7 +825,8 @@ public sealed class SettingsForm : Form, IGlassHost
         int y = 4;
         var target = AddCard(page, "Target display", "", ref y, 40 + 60 + 12);
 
-        // Flat ComboBox has no border of its own; host it in a 12px-rounded surface frame on the glass
+        // The ComboBox is clipped to its item area (its light native border and arrow button are cut away);
+        // the 12px-rounded surface frame and the chevron around it are drawn by this host
         var comboHost = new GlassPanel
         {
             Location = new Point(20, target.ContentTop - 3),
@@ -830,21 +837,25 @@ public sealed class SettingsForm : Form, IGlassHost
         };
         comboHost.Paint += (_, e) =>
         {
-            if (!_cboTargetMonitor.Focused) return;
             e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
             float s = comboHost.DeviceDpi / 96f;
+            float cx = comboHost.Width - 20 * s, cy = comboHost.Height / 2f;
+            using (var chevron = new Pen(Theme.TextMuted, 1.6f * s) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round })
+                e.Graphics.DrawLines(chevron, new[] { new PointF(cx - 4 * s, cy - 2 * s), new PointF(cx, cy + 2 * s), new PointF(cx + 4 * s, cy - 2 * s) });
+            if (!_cboTargetMonitor.Focused) return;
             using var path = Theme.RoundedRect(new RectangleF(0.5f, 0.5f, comboHost.Width - 1.5f, comboHost.Height - 1.5f), Theme.Radius * s);
             using var pen = new Pen(Color.FromArgb(150, Theme.Accent), 1f);
             e.Graphics.DrawPath(pen, path);
         };
         comboHost.Resize += (_, _) => comboHost.Invalidate();
+        comboHost.MouseDown += (_, _) => { _cboTargetMonitor.Focus(); _cboTargetMonitor.DroppedDown = true; };
 
         _cboTargetMonitor = new ComboBox
         {
             Location = new Point(10, 4),
             Size = new Size(comboHost.Width - 20, 28),
             DropDownStyle = ComboBoxStyle.DropDownList,
-            FlatStyle = FlatStyle.Standard,
+            FlatStyle = FlatStyle.Flat,
             BackColor = Theme.Surface,
             ForeColor = Theme.Text,
             DrawMode = DrawMode.OwnerDrawFixed,
@@ -862,18 +873,15 @@ public sealed class SettingsForm : Form, IGlassHost
                 selected ? Theme.Accent : Theme.Text,
                 TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
         };
-        // Windows' dark combo theme: dark frame, arrow and dropdown list instead of the light flat border
-        _cboTargetMonitor.HandleCreated += (_, _) =>
+        void ClipCombo()
         {
-            // #135 only means SetPreferredAppMode from Windows 10 1903 (build 18362); older builds keep the light frame
-            if (Environment.OSVersion.Version.Build < 18362) return;
-            try
-            {
-                if (!_darkAppMode) { SetPreferredAppMode(2); _darkAppMode = true; }
-                SetWindowTheme(_cboTargetMonitor.Handle, "DarkMode_CFD", null);
-            }
-            catch { }
-        };
+            var info = new COMBOBOXINFO { cbSize = System.Runtime.InteropServices.Marshal.SizeOf<COMBOBOXINFO>() };
+            if (!_cboTargetMonitor.IsHandleCreated || !GetComboBoxInfo(_cboTargetMonitor.Handle, ref info)) return;
+            var item = Rectangle.FromLTRB(info.rcItem.Left, info.rcItem.Top, info.rcItem.Right, info.rcItem.Bottom);
+            _cboTargetMonitor.Region = new Region(item);
+        }
+        _cboTargetMonitor.HandleCreated += (_, _) => ClipCombo();
+        _cboTargetMonitor.SizeChanged += (_, _) => ClipCombo();
         _cboTargetMonitor.SelectedIndexChanged += (_, _) => UpdateMonitorDetails();
         _cboTargetMonitor.GotFocus += (_, _) => comboHost.Invalidate();
         _cboTargetMonitor.LostFocus += (_, _) => comboHost.Invalidate();
