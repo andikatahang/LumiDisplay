@@ -376,7 +376,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         {
             Image = Logo.ToBitmap(32),
             Font = Theme.MediumFont(10F),
-            ForeColor = Theme.Accent,
+            ForeColor = Theme.Text,
             Padding = new Padding(0, 4, 0, 6)
         };
         menu.Items.Add(header);
@@ -774,7 +774,7 @@ internal sealed class HiddenHotkeyWindow : NativeWindow, IDisposable
 }
 
 /// <summary>
-/// Professional color table providing LumiDisplay's light palette (white, soft gray, dark blue).
+/// Professional color table providing LumiDisplay's dark gray palette.
 /// </summary>
 internal sealed class LumiDisplayColorTable : ProfessionalColorTable
 {
@@ -798,13 +798,39 @@ internal sealed class LumiDisplayColorTable : ProfessionalColorTable
 
 /// <summary>
 /// Custom ToolStripProfessionalRenderer applying LumiDisplay styling to tray context menu:
-/// rounded dark-blue-tinted hover pills, dark blue check marks and thin separators.
+/// a dark panel with Windows 11 rounded corners, soft hover pills, light check marks and thin separators.
 /// </summary>
 internal sealed class LumiDisplayMenuRenderer : ToolStripProfessionalRenderer
 {
+    [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
+
+    private const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
+    private const int DWMWCP_ROUND = 2;
+
     public LumiDisplayMenuRenderer() : base(new LumiDisplayColorTable())
     {
         RoundedEdges = false;
+    }
+
+    // Runs for the menu and every submenu that shares this renderer
+    protected override void Initialize(ToolStrip toolStrip)
+    {
+        base.Initialize(toolStrip);
+        if (toolStrip is not ToolStripDropDown dropDown) return;
+        if (dropDown.IsHandleCreated) RoundCorners(dropDown);
+        dropDown.HandleCreated += (_, _) => RoundCorners(dropDown);
+    }
+
+    // shortcut: Windows 10 has no DWM corner preference and keeps square corners; fine for a Windows 11 look
+    private static void RoundCorners(Control c)
+    {
+        try
+        {
+            int round = DWMWCP_ROUND;
+            DwmSetWindowAttribute(c.Handle, DWMWA_WINDOW_CORNER_PREFERENCE, ref round, sizeof(int));
+        }
+        catch { }
     }
 
     protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e)
@@ -815,24 +841,19 @@ internal sealed class LumiDisplayMenuRenderer : ToolStripProfessionalRenderer
         g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
         var rect = new RectangleF(3, 1, e.Item.Width - 6, e.Item.Height - 2);
         using var path = Theme.RoundedRect(rect, 6);
-        using var brush = new SolidBrush(Theme.AccentSoft);
+        using var brush = new SolidBrush(Theme.SurfaceAlt);
         g.FillPath(brush, path);
     }
 
     protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
     {
-        if (e.Item is ToolStripLabel)
-            e.TextColor = Theme.Accent;
-        else if (!e.Item.Enabled)
-            e.TextColor = Theme.TextFaint;
-        else
-            e.TextColor = e.Item.Selected ? Theme.Accent : Theme.Text;
+        e.TextColor = e.Item.Enabled || e.Item is ToolStripLabel ? Theme.Text : Theme.TextFaint;
         base.OnRenderItemText(e);
     }
 
     protected override void OnRenderArrow(ToolStripArrowRenderEventArgs e)
     {
-        e.ArrowColor = e.Item?.Selected == true ? Theme.Accent : Theme.TextMuted;
+        e.ArrowColor = e.Item?.Selected == true ? Theme.Text : Theme.TextMuted;
         base.OnRenderArrow(e);
     }
 
@@ -854,7 +875,7 @@ internal sealed class LumiDisplayMenuRenderer : ToolStripProfessionalRenderer
         using (var brush = new SolidBrush(Theme.Accent))
             g.FillPath(brush, path);
 
-        using var pen = new Pen(Color.White, Math.Max(1.6f, rect.Width / 9f))
+        using var pen = new Pen(Theme.OnAccent, Math.Max(1.6f, rect.Width / 9f))
         {
             StartCap = System.Drawing.Drawing2D.LineCap.Round,
             EndCap = System.Drawing.Drawing2D.LineCap.Round,
