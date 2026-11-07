@@ -100,7 +100,7 @@ Monitor yang punya speaker juga memiliki level **hardware** sendiri. Level ini b
 <details>
 <summary><b>Muncul "Windows protected your PC" saat dibuka</b></summary>
 
-Itu peringatan SmartScreen untuk aplikasi tanpa tanda tangan digital yang diunduh dari internet. Klik **More info → Run anyway**. Anda bisa mencocokkan file unduhan dengan `SHA256SUMS.txt` di halaman rilis.
+Itu peringatan SmartScreen untuk aplikasi tanpa tanda tangan digital yang diunduh dari internet. Klik **More info → Run anyway**.
 </details>
 
 <details>

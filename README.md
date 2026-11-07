@@ -100,7 +100,7 @@ Monitors with built-in speakers also have their own **hardware** level. It stack
 <details>
 <summary><b>"Windows protected your PC" when starting</b></summary>
 
-This is SmartScreen warning about an unsigned app downloaded from the internet. Click **More info → Run anyway**. You can verify the download against `SHA256SUMS.txt` on the release page.
+This is SmartScreen warning about an unsigned app downloaded from the internet. Click **More info → Run anyway**.
 </details>
 
 <details>
