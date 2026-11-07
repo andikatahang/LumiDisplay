@@ -875,20 +875,23 @@ internal sealed class SliderBar : ThemedControl
 }
 
 /// <summary>
-/// Sidebar navigation entry with a glyph; the selected entry sits on a brighter glass pill.
+/// Page-list entry: the page's glyph in a round tile, its name and a one-line description.
+/// The selected entry sits on a brighter glass pill.
 /// </summary>
 internal sealed class NavItem : ThemedControl
 {
     private bool _selected;
     private bool _hover;
+    private readonly string _description;
 
     public Glyph Glyph { get; }
 
-    public NavItem(string text, Glyph glyph)
+    public NavItem(string text, string description, Glyph glyph)
     {
         Text = text;
+        _description = description;
         Glyph = glyph;
-        Size = new Size(200, 40);
+        Size = new Size(200, 56);
         Cursor = Cursors.Hand;
         BackColor = Theme.Surface;
     }
@@ -909,29 +912,66 @@ internal sealed class NavItem : ThemedControl
         Glass.PaintBehind(g, this);
 
         var rect = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
-        if (_selected)
+        if (_selected || _hover)
         {
             using var path = Theme.RoundedRect(rect, Px(Theme.Radius));
-            using var brush = new SolidBrush(Theme.Overlay(23));
-            g.FillPath(brush, path);
-            using var hair = new Pen(Glass.Hairline, 1f);
-            g.DrawPath(hair, path);
-        }
-        else if (_hover)
-        {
-            using var path = Theme.RoundedRect(rect, Px(Theme.Radius));
-            using var brush = new SolidBrush(Theme.Overlay(12));
+            using var brush = new SolidBrush(Theme.Overlay(_selected ? 23 : 12));
             g.FillPath(brush, path);
         }
 
-        var color = _selected ? Theme.Accent : Theme.TextMuted;
+        float tile = Px(36);
+        var tileRect = new RectangleF(Px(10), (Height - tile) / 2, tile, tile);
+        using (var tileBrush = new SolidBrush(Theme.Overlay(_selected ? 30 : 15)))
+            g.FillEllipse(tileBrush, tileRect);
         float gs = Px(18);
-        Glyphs.Draw(g, Glyph, new RectangleF(Px(14), (Height - gs) / 2, gs, gs), color);
+        Glyphs.Draw(g, Glyph, new RectangleF(tileRect.X + (tile - gs) / 2, tileRect.Y + (tile - gs) / 2, gs, gs),
+            _selected ? Theme.Text : Theme.TextMuted);
 
-        using var font = _selected ? Theme.MediumFont(9.5f) : Theme.Font(9.5f);
-        TextRenderer.DrawText(g, Text, font, new Rectangle(PxI(44), 0, Width - PxI(48), Height),
-            _selected ? Theme.Accent : Theme.TextSecondary,
-            TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
+        int textX = PxI(56);
+        var flags = TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis;
+        using var font = Theme.MediumFont(9.5f);
+        using var descFont = Theme.Font(8.25f);
+        int top = (Height - font.Height - descFont.Height - PxI(2)) / 2;
+        TextRenderer.DrawText(g, Text, font, new Rectangle(textX, top, Width - textX - PxI(8), font.Height),
+            _selected ? Theme.Text : Theme.TextSecondary, flags);
+        TextRenderer.DrawText(g, _description, descFont,
+            new Rectangle(textX, top + font.Height + PxI(2), Width - textX - PxI(8), descFont.Height), Theme.TextMuted, flags);
+    }
+}
+
+/// <summary>
+/// Round icon button in the left rail; the active section is a solid light circle with a dark glyph.
+/// </summary>
+internal sealed class RailButton : ThemedControl
+{
+    private bool _selected;
+
+    public Glyph Glyph { get; }
+
+    public RailButton(Glyph glyph)
+    {
+        Glyph = glyph;
+        Size = new Size(40, 40);
+    }
+
+    public bool Selected
+    {
+        get => _selected;
+        set { _selected = value; Invalidate(); }
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        PrepareGraphics(g);
+        Glass.PaintBehind(g, this);
+
+        var circle = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
+        using (var brush = new SolidBrush(_selected ? Theme.Accent : Theme.Overlay(15)))
+            g.FillEllipse(brush, circle);
+        float gs = Px(18);
+        Glyphs.Draw(g, Glyph, new RectangleF((Width - gs) / 2, (Height - gs) / 2, gs, gs),
+            _selected ? Theme.OnAccent : Theme.TextMuted);
     }
 }
 

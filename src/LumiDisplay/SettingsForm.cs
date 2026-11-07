@@ -8,7 +8,7 @@ namespace LumiDisplay;
 /// <summary>
 /// Settings window for LumiDisplay.
 /// Allows configuring hotkeys, step sizes, startup preferences, and testing monitor adjustments.
-/// Light theme: white sidebar and cards on a soft-gray page, dark blue accent.
+/// Dark gray glass in three columns: icon rail, page list, page content.
 /// </summary>
 public sealed class SettingsForm : Form, IGlassHost
 {
@@ -27,7 +27,14 @@ public sealed class SettingsForm : Form, IGlassHost
     private const int DWMWA_CAPTION_COLOR = 35;
     private const int DWMWA_TEXT_COLOR = 36;
 
-    private const int SidebarWidth = 224;
+    // Three columns, each a floating glass panel: icon rail, page list, page content
+    private const int Gap = 12;
+    private const int RailWidth = 60;
+    private const int ListWidth = 228;
+    private const int ColumnRadius = 16;
+    private const int ColumnInset = 6;  // keeps square child panels inside the column's rounded corners
+    private const int ColumnHeight = 600 - Gap * 2;
+    private const int ContentX = Gap * 3 + RailWidth + ListWidth;
     private const int ContentWidth = 636;
     private const int HeaderHeight = 84;
     private const int FooterHeight = 68;
@@ -293,7 +300,7 @@ public sealed class SettingsForm : Form, IGlassHost
         AutoScaleMode = AutoScaleMode.Dpi;
 
         Text = "LumiDisplay Settings";
-        ClientSize = new Size(SidebarWidth + ContentWidth, 600);
+        ClientSize = new Size(ContentX + ContentWidth + ColumnInset * 2 + Gap, 600);
         FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox = false;
         MinimizeBox = true;
@@ -305,10 +312,10 @@ public sealed class SettingsForm : Form, IGlassHost
         ForeColor = Theme.Text;
         try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
 
-        // Content area (right): header, scrollable pages, footer — all on the window's glass
+        // Content column (right): header, scrollable pages, footer on one rounded glass panel
         var header = new GlassPanel
         {
-            Location = new Point(SidebarWidth, 0),
+            Location = new Point(ColumnInset, ColumnInset),
             Size = new Size(ContentWidth, HeaderHeight)
         };
         _lblPageTitle = new Label
@@ -331,71 +338,88 @@ public sealed class SettingsForm : Form, IGlassHost
         header.Controls.Add(_lblPageTitle);
         header.Controls.Add(_lblPageSubtitle);
 
-        AddPage("General", Glyph.Gear, "General", "Startup behaviour and media key handling.", BuildGeneralTab);
-        AddPage("Stepping & OSD", Glyph.Sliders, "Stepping & OSD", "How far each key press moves brightness and volume.", BuildSteppingTab);
-        AddPage("Hotkeys", Glyph.Keyboard, "Hotkeys", "Global keyboard shortcuts for your displays.", BuildHotkeysTab);
-        AddPage("Monitors & Test", Glyph.Monitor, "Monitors & Test", "Pick a target display and try changes live.", BuildMonitorsTab);
+        AddPage("General", "Startup and media keys", Glyph.Gear, "General", "Startup behaviour and media key handling.", BuildGeneralTab);
+        AddPage("Stepping & OSD", "Step size per key press", Glyph.Sliders, "Stepping & OSD", "How far each key press moves brightness and volume.", BuildSteppingTab);
+        AddPage("Hotkeys", "Global keyboard shortcuts", Glyph.Keyboard, "Hotkeys", "Global keyboard shortcuts for your displays.", BuildHotkeysTab);
+        AddPage("Monitors & Test", "Pick a display, try it live", Glyph.Monitor, "Monitors & Test", "Pick a target display and try changes live.", BuildMonitorsTab);
 
         var footer = BuildFooter();
-        var sidebar = BuildSidebar();
-
-        Controls.Add(header);
+        var content = new GlassPanel
+        {
+            IsSurface = true,
+            Radius = ColumnRadius,
+            Location = new Point(ContentX, Gap),
+            Size = new Size(ContentWidth + ColumnInset * 2, ColumnHeight)
+        };
+        content.Controls.Add(header);
         foreach (var page in _pages)
-            Controls.Add(page);
-        Controls.Add(footer);
-        Controls.Add(sidebar);
+            content.Controls.Add(page);
+        content.Controls.Add(footer);
+
+        Controls.Add(content);
+        Controls.Add(BuildRail());
+        Controls.Add(BuildPageList());
 
         ResumeLayout(false);
     }
 
     // --- Shell ---
 
-    private Panel BuildSidebar()
+    private Panel BuildRail()
     {
-        // A floating glass panel, inset from the window edges
-        const int inset = 12;
-        int width = SidebarWidth - inset * 2;
-        int height = 600 - inset * 2;
-        var sidebar = new GlassPanel
+        var rail = new GlassPanel
         {
             IsSurface = true,
-            Location = new Point(inset, inset),
+            Radius = ColumnRadius,
+            Location = new Point(Gap, Gap),
+            Size = new Size(RailWidth, ColumnHeight)
+        };
+        rail.Paint += (_, e) =>
+        {
+            float s = rail.DeviceDpi / 96f;
+            Logo.Draw(e.Graphics, new RectangleF((RailWidth - 36) / 2f * s, 16 * s, 36 * s, 36 * s));
+        };
+        // Settings is the app's only section, so its rail button is always the active one
+        rail.Controls.Add(new RailButton(Glyph.Gear)
+        {
+            Selected = true,
+            Location = new Point((RailWidth - 40) / 2, 76)
+        });
+        return rail;
+    }
+
+    private Panel BuildPageList()
+    {
+        int width = ListWidth;
+        int height = ColumnHeight;
+        var list = new GlassPanel
+        {
+            IsSurface = true,
+            Radius = ColumnRadius,
+            Location = new Point(Gap * 2 + RailWidth, Gap),
             Size = new Size(width, height)
         };
-        sidebar.Paint += (_, e) =>
-        {
-            var g = e.Graphics;
-            float s = sidebar.DeviceDpi / 96f;
-            Logo.Draw(g, new RectangleF(14 * s, 14 * s, 36 * s, 36 * s));
 
-            using var nameFont = Theme.SemiboldFont(12F);
-            using var tagFont = Theme.Font(8F);
-            TextRenderer.DrawText(g, "LumiDisplay", nameFont, new Point((int)(60 * s), (int)(14 * s)), Theme.Text,
-                TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
-            TextRenderer.DrawText(g, "Display & audio control", tagFont, new Point((int)(61 * s), (int)(36 * s)), Theme.TextMuted,
-                TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
-        };
-
-        var lblSection = new Label
+        var lblTitle = new Label
         {
-            Text = "SETTINGS",
-            Location = new Point(18, 74),
+            Text = "Settings",
+            Location = new Point(17, 20),
             AutoSize = true,
-            Font = Theme.MediumFont(7.5F),
-            ForeColor = Theme.TextFaint,
+            Font = Theme.SemiboldFont(13F),
+            ForeColor = Theme.Text,
             BackColor = Color.Transparent
         };
-        sidebar.Controls.Add(lblSection);
+        list.Controls.Add(lblTitle);
 
         for (int i = 0; i < _navItems.Count; i++)
         {
             var nav = _navItems[i];
-            nav.Location = new Point(8, 94 + i * 44);
+            nav.Location = new Point(8, 64 + i * 62);
             nav.Width = width - 16;
-            sidebar.Controls.Add(nav);
+            list.Controls.Add(nav);
         }
 
-        // Status block at the bottom of the sidebar
+        // Status block at the bottom of the page list
         var status = new GlassPanel
         {
             Location = new Point(8, height - 8 - 60),
@@ -431,16 +455,16 @@ public sealed class SettingsForm : Form, IGlassHost
         };
         status.Controls.Add(_lblMonitorStatus);
         status.Controls.Add(lblVersion);
-        sidebar.Controls.Add(status);
+        list.Controls.Add(status);
 
-        return sidebar;
+        return list;
     }
 
     private Panel BuildFooter()
     {
         var footer = new GlassPanel
         {
-            Location = new Point(SidebarWidth, 600 - FooterHeight),
+            Location = new Point(ColumnInset, ColumnHeight - ColumnInset - FooterHeight),
             Size = new Size(ContentWidth, FooterHeight)
         };
         footer.Paint += (_, e) =>
@@ -517,18 +541,18 @@ public sealed class SettingsForm : Form, IGlassHost
         return footer;
     }
 
-    private void AddPage(string navText, Glyph glyph, string title, string subtitle, Action<Panel> build)
+    private void AddPage(string navText, string navDescription, Glyph glyph, string title, string subtitle, Action<Panel> build)
     {
         int index = _pages.Count;
-        var nav = new NavItem(navText, glyph);
+        var nav = new NavItem(navText, navDescription, glyph);
         nav.Click += (_, _) => SelectPage(index);
         _navItems.Add(nav);
 
         // Scrolls with a slim overlay scrollbar; cards go into page.Content
         var page = new GlassScrollPanel
         {
-            Location = new Point(SidebarWidth, HeaderHeight),
-            Size = new Size(ContentWidth, 600 - HeaderHeight - FooterHeight),
+            Location = new Point(ColumnInset, ColumnInset + HeaderHeight),
+            Size = new Size(ContentWidth, ColumnHeight - ColumnInset * 2 - HeaderHeight - FooterHeight),
             Visible = false
         };
         page.Content.Size = page.Size;
