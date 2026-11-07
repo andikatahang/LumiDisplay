@@ -36,7 +36,7 @@
 - **Keyboard shortcuts** for brightness (standard and fine steps) and contrast.
 - **Even 10% steps** for brightness, contrast and volume — every press lands on 10, 20, 30 … 100% (fine steps of 2% with Shift). Both sizes are adjustable.
 - **Sync contrast with brightness** (optional) — contrast moves along with brightness, while the contrast keys still adjust it on its own.
-- **On-screen display** as a dark gray glass pill with a gray fill and the current level in percent.
+- **On-screen display** as a dark gray glass pill with the current level in percent. It appears the moment you press a key, and the gray fill glides smoothly to each new level.
 - **Lives in the system tray** — quick presets, per-monitor targeting, and it can start with Windows.
 - **Portable** — a single `.exe`, no installer, no .NET runtime to install.
 

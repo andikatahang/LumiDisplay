@@ -36,7 +36,7 @@
 - **Shortcut keyboard** untuk kecerahan (langkah normal dan halus) serta kontras.
 - **Langkah rata 10%** untuk kecerahan, kontras, dan volume — setiap tekan berhenti di 10, 20, 30 … 100% (langkah halus 2% dengan Shift). Kedua ukuran bisa diatur.
 - **Sinkronkan kontras dengan kecerahan** (opsional) — kontras ikut berubah bersama kecerahan, sementara tombol kontras tetap bisa mengaturnya sendiri.
-- **Indikator di layar (OSD)** berupa pil kaca abu-abu gelap dengan isian abu-abu dan level saat ini dalam persen.
+- **Indikator di layar (OSD)** berupa pil kaca abu-abu gelap dengan level saat ini dalam persen. Muncul begitu tombol ditekan, dan isian abu-abunya meluncur halus ke setiap level baru.
 - **Berjalan di system tray** — ada preset cepat, pilihan monitor yang dikontrol, dan bisa ikut menyala bersama Windows.
 - **Portabel** — cukup satu file `.exe`, tanpa installer, tanpa perlu memasang .NET.
 
