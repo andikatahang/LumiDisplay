@@ -2,8 +2,6 @@ using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
-using System.Runtime.InteropServices;
-using System.Text;
 using System.Windows.Forms;
 
 namespace LumiDisplay;
@@ -21,64 +19,60 @@ internal interface IGlassSurface
 }
 
 /// <summary>
-/// "Liquid glass" for the settings window, built from the desktop wallpaper the way Windows'
-/// Mica is: the wallpaper under the window, blurred heavily and washed toward dark gray.
+/// "Liquid glass" for the settings window, over the app's own black-and-white background image
+/// (Assets/background.jpg).
 ///
 /// Two layers are pre-rendered at the window's client size, so every control copies exactly the
 /// pixels behind it (no seams between controls, no per-paint blurring):
-///   Base    — the window background (blurred wallpaper + dark gray wash)
-///   Surface — Base plus the faint white wash of a glass panel (cards, sidebar)
-/// Rebuilt when the window is shown, moved, resized or the wallpaper changes.
+///   Base    — the window background (the image, lightly washed so it shows between the panels)
+///   Surface — the image blurred and washed dark enough for text, plus the faint white wash of a
+///             glass panel (cards, sidebar)
+/// Rebuilt when the window is shown, resized or its DPI changes.
 /// </summary>
 internal sealed class GlassBackdrop : IDisposable
 {
     public Bitmap? Base { get; private set; }
     public Bitmap? Surface { get; private set; }
 
-    /// <summary>Average color along the top edge, for a title bar that blends in.</summary>
+    /// <summary>Average color along the top edge of the glass, for a title bar that blends in.</summary>
     public Color TopColor { get; private set; } = Theme.Window;
 
     public void Rebuild(Form form)
     {
         if (!form.IsHandleCreated || form.ClientSize.Width <= 0 || form.ClientSize.Height <= 0) return;
 
-        var client = form.RectangleToScreen(form.ClientRectangle);
-        var monitor = Screen.FromRectangle(client).Bounds;
+        var size = form.ClientSize;
+        using var image = Glass.CoverImage(size);
 
-        var baseLayer = new Bitmap(client.Width, client.Height, PixelFormat.Format32bppArgb);
+        var baseLayer = new Bitmap(size.Width, size.Height, PixelFormat.Format32bppArgb);
         using (var g = Graphics.FromImage(baseLayer))
         {
-            var wallpaper = Glass.BlurredWallpaper(monitor.Size);
-            if (wallpaper != null)
-            {
-                // The part of the (blurred) wallpaper that sits under the window
-                float k = wallpaper.Width / (float)monitor.Width;
-                var src = new RectangleF((client.X - monitor.X) * k, (client.Y - monitor.Y) * k, client.Width * k, client.Height * k);
-                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-                using var attrs = new ImageAttributes();
-                attrs.SetWrapMode(WrapMode.TileFlipXY);
-                g.DrawImage(wallpaper, new Rectangle(0, 0, client.Width, client.Height),
-                    src.X, src.Y, src.Width, src.Height, GraphicsUnit.Pixel, attrs);
-            }
+            if (image != null)
+                g.DrawImageUnscaled(image, 0, 0);
             else
             {
-                // No wallpaper available: a calm graphite field
-                using var grad = new LinearGradientBrush(new Rectangle(0, 0, client.Width, client.Height),
+                // Image missing: a calm graphite field
+                using var grad = new LinearGradientBrush(new Rectangle(Point.Empty, size),
                     Color.FromArgb(58, 60, 64), Color.FromArgb(42, 43, 46), 35f);
-                g.FillRectangle(grad, 0, 0, client.Width, client.Height);
+                g.FillRectangle(grad, 0, 0, size.Width, size.Height);
             }
-            int alpha = Glass.AdaptiveWashAlpha(baseLayer, Glass.WindowWashAlpha, Glass.WindowWashAlphaBright);
-            using var wash = new SolidBrush(Color.FromArgb(alpha, Glass.WindowWash));
-            g.FillRectangle(wash, 0, 0, client.Width, client.Height);
+            using var wash = new SolidBrush(Color.FromArgb(Glass.BackgroundWashAlpha, Glass.WindowWash));
+            g.FillRectangle(wash, 0, 0, size.Width, size.Height);
         }
 
-        var surfaceLayer = new Bitmap(baseLayer);
+        float scale = form.DeviceDpi / 96f;
+        var surfaceLayer = image != null
+            ? Glass.Blur(image, Math.Max(3, (int)Math.Round(4 * scale)))
+            : new Bitmap(baseLayer);
         using (var g = Graphics.FromImage(surfaceLayer))
-        using (var wash = new SolidBrush(Glass.SurfaceWash))
-            g.FillRectangle(wash, 0, 0, client.Width, client.Height);
+        {
+            using (var wash = new SolidBrush(Color.FromArgb(Glass.SafeWashAlpha(surfaceLayer), Glass.WindowWash)))
+                g.FillRectangle(wash, 0, 0, size.Width, size.Height);
+            using (var wash = new SolidBrush(Glass.SurfaceWash))
+                g.FillRectangle(wash, 0, 0, size.Width, size.Height);
+        }
 
-        TopColor = AverageTop(baseLayer);
+        TopColor = AverageTop(surfaceLayer);
         Base?.Dispose();
         Surface?.Dispose();
         Base = baseLayer;
@@ -109,11 +103,16 @@ internal sealed class GlassBackdrop : IDisposable
 
 internal static class Glass
 {
-    /// <summary>Wash over the wallpaper for the window background: keeps any wallpaper dark and calm.</summary>
+    /// <summary>Dark gray wash over the background image: keeps the glass dark and calm.</summary>
     public static readonly Color WindowWash = Color.FromArgb(200, 40, 41, 44);
 
-    /// <summary>Wash alphas for the settings window and OSD; bright backgrounds get the denser one so text stays readable.</summary>
-    public const int WindowWashAlpha = 200, WindowWashAlphaBright = 245;
+    /// <summary>Wash over the background image between the glass panels (no text sits there).</summary>
+    public const int BackgroundWashAlpha = 150;
+
+    /// <summary>Lightest wash a glass panel gets, even over a dark image.</summary>
+    public const int WindowWashAlpha = 200;
+
+    /// <summary>OSD wash alphas; bright backgrounds get the denser one so text stays readable.</summary>
     public const int OsdWashAlpha = 150, OsdWashAlphaBright = 225;
 
     /// <summary>
@@ -133,6 +132,36 @@ internal static class Glass
             }
         double t = n == 0 ? 0 : Math.Clamp((sum / n - 0.4) / 0.45, 0, 1);
         return (int)Math.Round(normal + (bright - normal) * t);
+    }
+
+    /// <summary>
+    /// Smallest wash alpha (at least <see cref="WindowWashAlpha"/>) that keeps muted text readable
+    /// (4.5:1) on a glass panel over the brightest pixel of <paramref name="bmp"/>.
+    /// </summary>
+    public static int SafeWashAlpha(Bitmap bmp)
+    {
+        int max = 0;
+        for (int y = 0; y < bmp.Height; y += 2)
+            for (int x = 0; x < bmp.Width; x += 2)
+            {
+                var c = bmp.GetPixel(x, y);
+                max = Math.Max(max, Math.Max(c.R, Math.Max(c.G, c.B)));
+            }
+        return SafeWashAlpha(Color.FromArgb(max, max, max));
+    }
+
+    public static int SafeWashAlpha(Color brightest)
+    {
+        for (int a = WindowWashAlpha; a < 255; a++)
+            if (Theme.ContrastRatio(Theme.TextMuted, PanelOver(brightest, a)) >= 4.6) return a;
+        return 255;
+    }
+
+    /// <summary>What a glass panel looks like over <paramref name="under"/> with a wash of <paramref name="alpha"/>.</summary>
+    public static Color PanelOver(Color under, int alpha)
+    {
+        var washed = Theme.Blend(Color.FromArgb(255, under), Color.FromArgb(255, WindowWash), alpha / 255f);
+        return Theme.Blend(washed, Color.FromArgb(255, SurfaceWash), SurfaceWash.A / 255f);
     }
 
     /// <summary>Extra wash of a glass panel (card, sidebar) over the window background.</summary>
@@ -220,116 +249,65 @@ internal static class Glass
         return false;
     }
 
-    // --- Wallpaper ---
+    // --- Background image ---
 
-    private static Bitmap? _wallpaper;
-    private static string? _wallpaperKey;
+    private static Bitmap? _background;
 
-    /// <summary>
-    /// The desktop wallpaper as it fills a monitor of <paramref name="monitor"/> size, reduced to a small,
-    /// heavily blurred image (cached). Null when no wallpaper can be read.
-    /// </summary>
-    public static Bitmap? BlurredWallpaper(Size monitor)
+    /// <summary>The background image (embedded, black and white), loaded once. Null if it can't be read.</summary>
+    private static Bitmap? Background()
     {
-        string? path = WallpaperPath();
-        Color? solid = path == null ? DesktopColor() : null;
-        string key = $"{path}|{solid}|{monitor.Width}x{monitor.Height}|{(path != null && System.IO.File.Exists(path) ? System.IO.File.GetLastWriteTimeUtc(path).Ticks : 0)}";
-        if (key == _wallpaperKey) return _wallpaper;
-
-        _wallpaper?.Dispose();
-        _wallpaper = null;
-        _wallpaperKey = key;
+        if (_background != null) return _background;
         try
         {
-            if (path != null)
-            {
-                using var image = Image.FromFile(path);
-                _wallpaper = BlurFill(image, monitor);
-            }
-            else if (solid != null)
-            {
-                _wallpaper = new Bitmap(64, Math.Max(1, 64 * monitor.Height / Math.Max(1, monitor.Width)));
-                using var g = Graphics.FromImage(_wallpaper);
-                g.Clear(solid.Value);
-            }
+            using var stream = typeof(Glass).Assembly.GetManifestResourceStream("LumiDisplay.Assets.background.jpg");
+            if (stream != null) _background = new Bitmap(stream);
         }
         catch
         {
-            _wallpaper = null;
+            _background = null;
         }
-        return _wallpaper;
+        return _background;
     }
 
-    /// <summary>Forgets the cached wallpaper (call when Windows reports a desktop change).</summary>
-    public static void InvalidateWallpaper() => _wallpaperKey = null;
-
-    private static Bitmap BlurFill(Image image, Size monitor)
+    /// <summary>The background image scaled to cover <paramref name="size"/>, centered (caller disposes).</summary>
+    public static Bitmap? CoverImage(Size size)
     {
-        // "Fill" placement: scale to cover the monitor, centered
-        float scale = Math.Max(monitor.Width / (float)image.Width, monitor.Height / (float)image.Height);
-        float srcW = monitor.Width / scale, srcH = monitor.Height / scale;
-        var src = new RectangleF((image.Width - srcW) / 2f, (image.Height - srcH) / 2f, srcW, srcH);
-
-        // Down to a tiny image (the blur), then up to a smooth mid-size image to sample from
-        int tinyW = 48, tinyH = Math.Max(1, (int)Math.Round(48f * monitor.Height / monitor.Width));
-        using var tiny = new Bitmap(tinyW, tinyH, PixelFormat.Format32bppArgb);
-        using (var g = Graphics.FromImage(tiny))
-        {
-            g.InterpolationMode = InterpolationMode.HighQualityBilinear;
-            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-            g.DrawImage(image, new Rectangle(0, 0, tinyW, tinyH), src.X, src.Y, src.Width, src.Height, GraphicsUnit.Pixel);
-        }
-
-        int midW = 384, midH = Math.Max(1, (int)Math.Round(384f * monitor.Height / monitor.Width));
-        var mid = new Bitmap(midW, midH, PixelFormat.Format32bppArgb);
-        using (var g = Graphics.FromImage(mid))
-        using (var attrs = new ImageAttributes())
-        {
-            attrs.SetWrapMode(WrapMode.TileFlipXY);
-            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-            g.DrawImage(tiny, new Rectangle(0, 0, midW, midH), 0, 0, tinyW, tinyH, GraphicsUnit.Pixel, attrs);
-        }
-        return mid;
+        var image = Background();
+        if (image == null) return null;
+        float scale = Math.Max(size.Width / (float)image.Width, size.Height / (float)image.Height);
+        float srcW = size.Width / scale, srcH = size.Height / scale;
+        var bmp = new Bitmap(size.Width, size.Height, PixelFormat.Format32bppArgb);
+        using var g = Graphics.FromImage(bmp);
+        g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+        g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+        using var attrs = new ImageAttributes();
+        attrs.SetWrapMode(WrapMode.TileFlipXY);
+        g.DrawImage(image, new Rectangle(Point.Empty, size),
+            (image.Width - srcW) / 2f, (image.Height - srcH) / 2f, srcW, srcH, GraphicsUnit.Pixel, attrs);
+        return bmp;
     }
 
-    private static string? WallpaperPath()
+    /// <summary>Strong, smooth blur: downscale by <paramref name="factor"/> in two passes, then scale back up bicubically.</summary>
+    public static Bitmap Blur(Bitmap source, int factor)
     {
-        try
-        {
-            var sb = new StringBuilder(520);
-            if (SystemParametersInfo(SPI_GETDESKWALLPAPER, (uint)sb.Capacity, sb, 0))
-            {
-                var p = sb.ToString();
-                if (!string.IsNullOrWhiteSpace(p) && System.IO.File.Exists(p)) return p;
-            }
-            // Windows keeps a copy of the current wallpaper here (also for Spotlight / slideshow)
-            var transcoded = System.IO.Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "Microsoft", "Windows", "Themes", "TranscodedWallpaper");
-            if (System.IO.File.Exists(transcoded)) return transcoded;
-        }
-        catch { }
-        return null;
+        int w = source.Width, h = source.Height;
+        using var mid = Resize(source, Math.Max(1, w / 3), Math.Max(1, h / 3), InterpolationMode.HighQualityBilinear);
+        using var small = Resize(mid, Math.Max(1, w / factor), Math.Max(1, h / factor), InterpolationMode.HighQualityBilinear);
+        return Resize(small, w, h, InterpolationMode.HighQualityBicubic);
     }
 
-    private static Color? DesktopColor()
+    private static Bitmap Resize(Bitmap src, int w, int h, InterpolationMode mode)
     {
-        try
-        {
-            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Control Panel\Colors");
-            var parts = (key?.GetValue("Background") as string)?.Split(' ');
-            if (parts is { Length: 3 })
-                return Color.FromArgb(int.Parse(parts[0]), int.Parse(parts[1]), int.Parse(parts[2]));
-        }
-        catch { }
-        return null;
+        var dst = new Bitmap(w, h, PixelFormat.Format32bppArgb);
+        using var g = Graphics.FromImage(dst);
+        g.InterpolationMode = mode;
+        g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+        g.CompositingMode = CompositingMode.SourceCopy;
+        using var attrs = new ImageAttributes();
+        attrs.SetWrapMode(WrapMode.TileFlipXY); // no dark fringe at the edges
+        g.DrawImage(src, new Rectangle(0, 0, w, h), 0, 0, src.Width, src.Height, GraphicsUnit.Pixel, attrs);
+        return dst;
     }
-
-    private const uint SPI_GETDESKWALLPAPER = 0x0073;
-
-    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern bool SystemParametersInfo(uint uiAction, uint uiParam, StringBuilder pvParam, uint fWinIni);
 }
 
 /// <summary>

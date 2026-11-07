@@ -37,6 +37,8 @@
     <EmbeddedResource Include="Fonts\Inter-Medium.ttf" LogicalName="LumiDisplay.Fonts.Inter-Medium.ttf" />
     <EmbeddedResource Include="Fonts\Inter-SemiBold.ttf" LogicalName="LumiDisplay.Fonts.Inter-SemiBold.ttf" />
     <None Include="Fonts\Inter-OFL.txt" />
+    <!-- Settings window background (black and white) -->
+    <EmbeddedResource Include="Assets\background.jpg" LogicalName="LumiDisplay.Assets.background.jpg" />
   </ItemGroup>
 
 </Project>

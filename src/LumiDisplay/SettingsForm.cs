@@ -56,21 +56,13 @@ public sealed class SettingsForm : Form, IGlassHost
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
-        Microsoft.Win32.SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
         RefreshGlass();
     }
 
     protected override void OnShown(EventArgs e)
     {
         base.OnShown(e);
-        RefreshGlass(); // final position is known now
-    }
-
-    // Moving or resizing ends here; the glass shows the wallpaper under the window's new spot
-    protected override void OnResizeEnd(EventArgs e)
-    {
-        base.OnResizeEnd(e);
-        RefreshGlass();
+        RefreshGlass(); // final size and DPI are known now
     }
 
     protected override void OnDpiChanged(DpiChangedEventArgs e)
@@ -79,12 +71,6 @@ public sealed class SettingsForm : Form, IGlassHost
         RefreshGlass();
     }
 
-    private void OnUserPreferenceChanged(object? sender, Microsoft.Win32.UserPreferenceChangedEventArgs e)
-    {
-        if (e.Category != Microsoft.Win32.UserPreferenceCategory.Desktop || IsDisposed) return;
-        Glass.InvalidateWallpaper();
-        BeginInvoke(new Action(RefreshGlass));
-    }
 
     private void RefreshGlass()
     {
@@ -296,7 +282,6 @@ public sealed class SettingsForm : Form, IGlassHost
         // Never leave the global shortcuts paused if the window closes mid-recording
         _suspendHotkeys?.Invoke(false);
         _savedFlashTimer.Dispose();
-        Microsoft.Win32.SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
         _backdrop.Dispose();
         base.OnFormClosed(e);
     }

@@ -127,10 +127,11 @@ internal static class Theme
         Debug.Assert(ContrastRatio(OnAccent, Accent) >= 7.0);
         Debug.Assert(ContrastRatio(Text, Window) >= 7.0);
 
-        // Worst case: a white wallpaper (or white window behind the OSD) under the densest wash
+        // Worst case: glass panels over white image pixels, or a white window behind the OSD
         static Color Over(Color top, int alpha, Color under) => Blend(under, Color.FromArgb(255, top), alpha / 255f);
-        var panelOnWhite = Over(Color.White, Glass.SurfaceWash.A, Over(Glass.WindowWash, Glass.WindowWashAlphaBright, Color.White));
+        var panelOnWhite = Glass.PanelOver(Color.White, Glass.SafeWashAlpha(Color.White));
         Debug.Assert(ContrastRatio(TextMuted, panelOnWhite) >= 4.5);
+        Debug.Assert(Glass.SafeWashAlpha(Color.Black) == Glass.WindowWashAlpha);
         var osdOnWhite = Over(Color.FromArgb(44, 45, 48), Glass.OsdWashAlphaBright, Color.White);
         Debug.Assert(ContrastRatio(Text, osdOnWhite) >= 4.5);
     }
