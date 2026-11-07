@@ -19,7 +19,7 @@ internal interface IGlassSurface
 }
 
 /// <summary>
-/// "Liquid glass" for the settings window, over the app's own black-and-white background image
+/// "Liquid glass" for the settings window, over the app's own soft gradient background image
 /// (Assets/background.jpg).
 ///
 /// Two layers are pre-rendered at the window's client size, so every control copies exactly the
@@ -110,7 +110,7 @@ internal static class Glass
     public static readonly Color WindowWash = Color.FromArgb(200, 40, 41, 44);
 
     /// <summary>Wash over the background image between the glass panels (no text sits there).</summary>
-    public const int BackgroundWashAlpha = 150;
+    public const int BackgroundWashAlpha = 40;
 
     /// <summary>Lightest wash a glass panel gets, even over a dark image.</summary>
     public const int WindowWashAlpha = 200;
@@ -256,7 +256,7 @@ internal static class Glass
 
     private static Bitmap? _background;
 
-    /// <summary>The background image (embedded, black and white), loaded once. Null if it can't be read.</summary>
+    /// <summary>The background image (embedded gradient), loaded once. Null if it can't be read.</summary>
     private static Bitmap? Background()
     {
         if (_background != null) return _background;
