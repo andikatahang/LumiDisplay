@@ -1,9 +1,6 @@
 ## Download
 
-| File | What it is |
-|---|---|
-| **`LumiDisplay.exe`** | The app. Download and double-click — no installer, no .NET required. |
-| `LumiDisplay-win-x64.zip` | Same app, zipped with the README and license. |
+**`LumiDisplay.exe`** is the app. Download and double-click — no installer, no .NET required.
 
 **Requirements:** Windows 10 (1809+) or Windows 11, 64-bit. External monitors need **DDC/CI enabled** in their on-screen menu.
 
