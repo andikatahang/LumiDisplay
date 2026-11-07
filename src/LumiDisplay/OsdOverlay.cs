@@ -10,10 +10,9 @@ namespace LumiDisplay;
 /// <summary>
 /// On-screen display for brightness, contrast, volume and mute.
 ///
-/// A frosted-glass slider in the macOS style: a 12px-rounded glass card made from the
-/// screen behind it (captured and blurred when the OSD appears), a small icon on the left, a
-/// large one on the right, and a pill track whose blue fill ends in a round knob. No numbers:
-/// the bar is the value.
+/// A frosted-glass slider: a dark glass pill made from the screen behind it (captured and blurred
+/// when the OSD appears), a small icon on the left, a large one on the right, a track whose gray
+/// fill ends in a round knob, and the value in percent. The fill glides to each new value.
 ///
 /// Rendered off-screen and pushed to a per-pixel-alpha layered window (UpdateLayeredWindow),
 /// so the antialiased corners and soft shadow blend with whatever is behind them.
@@ -91,12 +90,18 @@ public sealed class OsdOverlay : IDisposable
     {
         private OsdType _type;
         private double _fraction;
+        private double _shown;  // what the bar shows now; glides toward _fraction
         private bool _muted;
         private byte _opacity = 255;
         private Bitmap? _frame;
         private Bitmap? _backdrop;
         private int _washAlpha = Glass.OsdWashAlpha;
         private readonly System.Windows.Forms.Timer _fadeTimer;
+        private readonly System.Windows.Forms.Timer _glideTimer;
+        private readonly System.Diagnostics.Stopwatch _glideClock = new();
+
+        // Glide time constant: ~95% of the way to a new value in 3 × this
+        private const double GlideTauMs = 70;
 
         // Layout in 96-DPI px (scaled at runtime)
         private const float CardWidth = 360;
@@ -126,6 +131,8 @@ public sealed class OsdOverlay : IDisposable
 
             _fadeTimer = new System.Windows.Forms.Timer { Interval = 16 }; // ~60fps
             _fadeTimer.Tick += FadeTimerTick;
+            _glideTimer = new System.Windows.Forms.Timer { Interval = 16 };
+            _glideTimer.Tick += GlideTimerTick;
         }
 
         protected override CreateParams CreateParams
@@ -146,9 +153,16 @@ public sealed class OsdOverlay : IDisposable
 
         public void SetContent(OsdType type, double fraction, bool muted)
         {
+            // Glide only from a value the user just saw for the same control; otherwise start there
+            bool glide = Visible && type == _type && !muted && !_muted;
             _type = type;
             _fraction = fraction;
             _muted = muted;
+            if (!glide)
+            {
+                _glideTimer.Stop();
+                _shown = fraction;
+            }
         }
 
         public void ShowOsd()
@@ -176,6 +190,26 @@ public sealed class OsdOverlay : IDisposable
 
             if (!Visible)
                 Show();
+
+            if (_shown != _fraction && !_glideTimer.Enabled)
+            {
+                _glideClock.Restart();
+                _glideTimer.Start();
+            }
+        }
+
+        private void GlideTimerTick(object? sender, EventArgs e)
+        {
+            double dt = _glideClock.Elapsed.TotalMilliseconds;
+            _glideClock.Restart();
+            _shown += (_fraction - _shown) * (1 - Math.Exp(-dt / GlideTauMs));
+            if (Math.Abs(_fraction - _shown) < 0.001)
+            {
+                _shown = _fraction;
+                _glideTimer.Stop();
+            }
+            RenderFrame();
+            PushFrame();
         }
 
         public void FadeOut()
@@ -188,6 +222,8 @@ public sealed class OsdOverlay : IDisposable
             if (_opacity <= 25)
             {
                 _fadeTimer.Stop();
+                _glideTimer.Stop();
+                _shown = _fraction;
                 Hide();
                 _opacity = 255;
                 return;
@@ -207,36 +243,13 @@ public sealed class OsdOverlay : IDisposable
                 using var shot = new Bitmap(Width, Height, PixelFormat.Format32bppArgb);
                 using (var g = Graphics.FromImage(shot))
                     g.CopyFromScreen(Location, Point.Empty, Size);
-                _backdrop = Blur(shot, DeviceDpi / 96.0f);
+                _backdrop = Glass.Blur(shot, Math.Max(6, (int)Math.Round(12 * DeviceDpi / 96.0f)));
                 _washAlpha = Glass.AdaptiveWashAlpha(_backdrop, Glass.OsdWashAlpha, Glass.OsdWashAlphaBright);
             }
             catch
             {
                 // Secure desktop, locked screen…: plain glass tint is drawn instead
             }
-        }
-
-        /// <summary>Strong, smooth blur: downscale ~12× in two passes, then scale back up bicubically.</summary>
-        private static Bitmap Blur(Bitmap source, float scale)
-        {
-            int w = source.Width, h = source.Height;
-            int factor = Math.Max(6, (int)Math.Round(12 * scale));
-            using var mid = ResizeBitmap(source, Math.Max(1, w / 3), Math.Max(1, h / 3), InterpolationMode.HighQualityBilinear);
-            using var small = ResizeBitmap(mid, Math.Max(1, w / factor), Math.Max(1, h / factor), InterpolationMode.HighQualityBilinear);
-            return ResizeBitmap(small, w, h, InterpolationMode.HighQualityBicubic);
-        }
-
-        private static Bitmap ResizeBitmap(Bitmap src, int w, int h, InterpolationMode mode)
-        {
-            var dst = new Bitmap(w, h, PixelFormat.Format32bppArgb);
-            using var g = Graphics.FromImage(dst);
-            g.InterpolationMode = mode;
-            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-            g.CompositingMode = CompositingMode.SourceCopy;
-            using var attrs = new ImageAttributes();
-            attrs.SetWrapMode(WrapMode.TileFlipXY); // no dark fringe at the edges
-            g.DrawImage(src, new Rectangle(0, 0, w, h), 0, 0, src.Width, src.Height, GraphicsUnit.Pixel, attrs);
-            return dst;
         }
 
         // --- Rendering ---
@@ -328,7 +341,7 @@ public sealed class OsdOverlay : IDisposable
             }
 
             // Fill + knob: the knob sits at the end of the fill and never leaves the track
-            double frac = _muted ? 0 : Math.Clamp(_fraction, 0, 1);
+            double frac = _muted ? 0 : Math.Clamp(_shown, 0, 1);
             float knobX = track.X + th / 2f + (float)frac * (track.Width - th);
             if (frac > 0)
             {
@@ -365,7 +378,7 @@ public sealed class OsdOverlay : IDisposable
             using var valueBrush = new SolidBrush(_muted ? Theme.TextMuted : Theme.Text);
             using var valueFormat = new StringFormat { Alignment = StringAlignment.Far, LineAlignment = StringAlignment.Center };
             g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
-            g.DrawString(Math.Round(Math.Clamp(_fraction, 0, 1) * 100).ToString("0"), valueFont, valueBrush,
+            g.DrawString(Math.Round(Math.Clamp(_shown, 0, 1) * 100).ToString("0"), valueFont, valueBrush,
                 new RectangleF(card.Right - 52 * s, card.Y, 36 * s, card.Height), valueFormat);
         }
 
@@ -463,6 +476,7 @@ public sealed class OsdOverlay : IDisposable
             if (disposing)
             {
                 _fadeTimer.Dispose();
+                _glideTimer.Dispose();
                 _frame?.Dispose();
                 _backdrop?.Dispose();
             }
