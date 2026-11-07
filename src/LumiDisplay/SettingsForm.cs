@@ -15,6 +15,13 @@ public sealed class SettingsForm : Form, IGlassHost
     [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
 
+    [System.Runtime.InteropServices.DllImport("uxtheme.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern int SetWindowTheme(IntPtr hwnd, string? appName, string? idList);
+
+    // uxtheme #135 SetPreferredAppMode (undocumented, Windows 10 1903+): 2 = ForceDark, so common controls pick their dark theme
+    [System.Runtime.InteropServices.DllImport("uxtheme.dll", EntryPoint = "#135")]
+    private static extern int SetPreferredAppMode(int mode);
+
     private const int DWMWA_BORDER_COLOR = 34;
     private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
     private const int DWMWA_CAPTION_COLOR = 35;
@@ -393,7 +400,7 @@ public sealed class SettingsForm : Form, IGlassHost
         {
             Location = new Point(8, height - 8 - 60),
             Size = new Size(width - 16, 60),
-            Fill = Color.FromArgb(120, 255, 255, 255),
+            Fill = Theme.Overlay(14),
             Outline = true
         };
         status.Paint += (_, e) =>
@@ -786,12 +793,12 @@ public sealed class SettingsForm : Form, IGlassHost
         int y = 4;
         var target = AddCard(page, "Target display", "", ref y, 40 + 60 + 12);
 
-        // Flat ComboBox has no border of its own; host it in a white 12px-rounded frame on the glass
+        // Flat ComboBox has no border of its own; host it in a 12px-rounded surface frame on the glass
         var comboHost = new GlassPanel
         {
             Location = new Point(20, target.ContentTop - 3),
             Size = new Size(target.Width - 40 - 96 - 10, 36),
-            Fill = Color.White,
+            Fill = Theme.Surface,
             Outline = true,
             Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
         };
@@ -811,7 +818,7 @@ public sealed class SettingsForm : Form, IGlassHost
             Location = new Point(10, 4),
             Size = new Size(comboHost.Width - 20, 28),
             DropDownStyle = ComboBoxStyle.DropDownList,
-            FlatStyle = FlatStyle.Flat,
+            FlatStyle = FlatStyle.Standard,
             BackColor = Theme.Surface,
             ForeColor = Theme.Text,
             DrawMode = DrawMode.OwnerDrawFixed,
@@ -822,12 +829,22 @@ public sealed class SettingsForm : Form, IGlassHost
         {
             if (e.Index < 0) return;
             bool selected = (e.State & DrawItemState.Selected) != 0 && (e.State & DrawItemState.ComboBoxEdit) == 0;
-            using var bg = new SolidBrush(selected ? Color.FromArgb(232, 238, 248) : Theme.Surface);
+            using var bg = new SolidBrush(selected ? Theme.SurfaceAlt : Theme.Surface);
             e.Graphics.FillRectangle(bg, e.Bounds);
             var textRect = Rectangle.Inflate(e.Bounds, -6, 0);
             TextRenderer.DrawText(e.Graphics, _cboTargetMonitor.Items[e.Index]?.ToString(), _cboTargetMonitor.Font, textRect,
                 selected ? Theme.Accent : Theme.Text,
                 TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
+        };
+        // Windows' dark combo theme: dark frame, arrow and dropdown list instead of the light flat border
+        _cboTargetMonitor.HandleCreated += (_, _) =>
+        {
+            try
+            {
+                SetPreferredAppMode(2);
+                SetWindowTheme(_cboTargetMonitor.Handle, "DarkMode_CFD", null);
+            }
+            catch { } // older Windows: keeps the light combo frame
         };
         _cboTargetMonitor.SelectedIndexChanged += (_, _) => UpdateMonitorDetails();
         _cboTargetMonitor.GotFocus += (_, _) => comboHost.Invalidate();
@@ -884,7 +901,7 @@ public sealed class SettingsForm : Form, IGlassHost
             Location = new Point(20, rowY + 9),
             Size = new Size(32, 32),
             Radius = 10,
-            Fill = Color.FromArgb(170, 255, 255, 255),
+            Fill = Theme.Overlay(16),
             Outline = true
         };
         icon.Paint += (_, e) =>

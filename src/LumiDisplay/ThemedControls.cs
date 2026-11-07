@@ -7,7 +7,7 @@ using System.Windows.Forms;
 namespace LumiDisplay;
 
 /// <summary>
-/// Base for the owner-drawn light theme controls: double buffered, DPI-aware painting.
+/// Base for the owner-drawn dark glass controls: double buffered, DPI-aware painting.
 /// Layout passed in by callers is in 96-DPI units and scaled by the form's AutoScaleMode;
 /// offsets used while painting are scaled with <see cref="Px"/>.
 /// </summary>
@@ -126,9 +126,9 @@ internal sealed class ToggleSwitch : ThemedControl
         float d = track.Height - Px(5);
         float x = track.X + Px(2.5f) + _knob * (track.Width - d - Px(5));
         float y = track.Y + Px(2.5f);
-        using (var shadow = new SolidBrush(Color.FromArgb(40, 15, 23, 42)))
+        using (var shadow = new SolidBrush(Theme.Shadow(80)))
             g.FillEllipse(shadow, x, y + Px(1), d, d);
-        using (var knob = new SolidBrush(Color.White))
+        using (var knob = new SolidBrush(Theme.Blend(Theme.TextSecondary, Theme.OnAccent, _knob)))
             g.FillEllipse(knob, x, y, d, d);
     }
 
@@ -140,7 +140,7 @@ internal sealed class ToggleSwitch : ThemedControl
 }
 
 /// <summary>
-/// Rounded flat button. Primary buttons are filled dark blue, secondary are white with a gray outline.
+/// Rounded flat button. Primary buttons are a light gray pill, secondary are faint glass with a rim.
 /// </summary>
 internal sealed class RoundedButton : ThemedControl
 {
@@ -198,7 +198,7 @@ internal sealed class RoundedButton : ThemedControl
         if (!Enabled)
         {
             // Disabled: barely-there glass, no hover/press feedback
-            using var brush = new SolidBrush(Color.FromArgb(70, 255, 255, 255));
+            using var brush = new SolidBrush(Theme.Overlay(8));
             g.FillPath(brush, path);
             using var pen = new Pen(Glass.Hairline, 1f);
             g.DrawPath(pen, path);
@@ -206,19 +206,17 @@ internal sealed class RoundedButton : ThemedControl
         }
         else if (Primary)
         {
-            // Solid accent with a soft light falloff from the top
+            // Flat light pill
             var baseColor = _pressed ? Theme.AccentPressed : _hover ? Theme.AccentHover : Theme.Accent;
             using (var brush = new SolidBrush(baseColor))
                 g.FillPath(brush, path);
-            using (var sheen = new LinearGradientBrush(rect, Color.FromArgb(46, 255, 255, 255), Color.FromArgb(0, 255, 255, 255), LinearGradientMode.Vertical))
-                g.FillPath(sheen, path);
-            text = Color.White;
+            text = Theme.OnAccent;
         }
         else
         {
-            // Glass button: more opaque white the more it is engaged
-            int alpha = _pressed ? 235 : _hover ? 205 : 160;
-            using (var brush = new SolidBrush(Color.FromArgb(alpha, 255, 255, 255)))
+            // Glass button: brighter the more it is engaged
+            int alpha = _pressed ? 34 : _hover ? 26 : 16;
+            using (var brush = new SolidBrush(Theme.Overlay(alpha)))
                 g.FillPath(brush, path);
             Glass.DrawRim(g, rect, radius, Scale96);
             text = Theme.Text;
@@ -227,7 +225,7 @@ internal sealed class RoundedButton : ThemedControl
         if (Focused && ShowFocusCues && Enabled)
         {
             using var ring = Theme.RoundedRect(RectangleF.Inflate(rect, -Px(2.5f), -Px(2.5f)), Math.Max(0, radius - Px(2.5f)));
-            using var ringPen = new Pen(Primary ? Color.FromArgb(160, 255, 255, 255) : Color.FromArgb(120, Theme.Accent), Px(1.2f));
+            using var ringPen = new Pen(Primary ? Color.FromArgb(160, Theme.OnAccent) : Color.FromArgb(120, Theme.Accent), Px(1.2f));
             g.DrawPath(ringPen, ring);
         }
 
@@ -402,7 +400,7 @@ internal static class KeyCaps
             var cap = new RectangleF(x, y, capW, capH);
             using (var capPath = Theme.RoundedRect(cap, 6 * scale))
             {
-                using var fill = new SolidBrush(Color.FromArgb(215, 255, 255, 255));
+                using var fill = new SolidBrush(Theme.Overlay(20));
                 g.FillPath(fill, capPath);
                 using var border = new Pen(borderColor, 1f);
                 g.DrawPath(border, capPath);
@@ -652,11 +650,11 @@ internal sealed class ShortcutRecorder : ThemedControl
         bool problem = _error != null || (_unavailable && !_recording);
         Color border = _recording ? Theme.Accent
                      : problem ? Theme.Danger
-                     : _hover || Focused ? Color.FromArgb(70, 15, 23, 42)
+                     : _hover || Focused ? Theme.Overlay(70)
                      : Glass.Hairline;
         using (var path = Theme.RoundedRect(rect, Px(Theme.Radius)))
         {
-            using var fill = new SolidBrush(_recording ? Color.FromArgb(235, 238, 243, 252) : Color.FromArgb(_hover ? 215 : 170, 255, 255, 255));
+            using var fill = new SolidBrush(_recording ? Theme.Overlay(30) : Theme.Overlay(_hover ? 22 : 14));
             g.FillPath(fill, path);
             using var pen = new Pen(border, _recording ? Px(1.6f) : 1f);
             g.DrawPath(pen, path);
@@ -693,7 +691,7 @@ internal sealed class ShortcutRecorder : ThemedControl
         }
 
         KeyCaps.Draw(g, HotkeyManager.DescribeKeys(_modifiers, _key), Px(8), cy, Scale96,
-            _unavailable ? Theme.Danger : Theme.Accent, _unavailable ? Theme.Danger : Color.FromArgb(46, 15, 23, 42));
+            _unavailable ? Theme.Danger : Theme.Accent, _unavailable ? Theme.Danger : Theme.Overlay(46));
 
         if (_hover)
         {
@@ -701,7 +699,7 @@ internal sealed class ShortcutRecorder : ThemedControl
             var c = ClearRect;
             float r = Px(9);
             var circle = new RectangleF(c.X + (c.Width - 2 * r) / 2, cy - r, 2 * r, 2 * r);
-            using (var bg = new SolidBrush(_hoverClear ? Color.FromArgb(40, 15, 23, 42) : Color.FromArgb(22, 15, 23, 42)))
+            using (var bg = new SolidBrush(_hoverClear ? Theme.Overlay(40) : Theme.Overlay(22)))
                 g.FillEllipse(bg, circle);
             using var xPen = new Pen(_hoverClear ? Theme.Text : Theme.TextMuted, Px(1.4f));
             float d = Px(3.5f);
@@ -850,7 +848,7 @@ internal sealed class SliderBar : ThemedControl
         float thumbX = TrackLeft + t * (TrackRight - TrackLeft);
 
         using (var track = Theme.RoundedRect(new RectangleF(TrackLeft, cy - trackH / 2, TrackRight - TrackLeft, trackH), trackH / 2))
-        using (var trackBrush = new SolidBrush(Color.FromArgb(34, 15, 23, 42)))
+        using (var trackBrush = new SolidBrush(Theme.Overlay(34)))
             g.FillPath(trackBrush, track);
 
         if (thumbX > TrackLeft)
@@ -867,11 +865,11 @@ internal sealed class SliderBar : ThemedControl
             using var halo = new SolidBrush(Color.FromArgb(45, Theme.Accent));
             g.FillEllipse(halo, RectangleF.Inflate(thumb, Px(4), Px(4)));
         }
-        using (var shadow = new SolidBrush(Color.FromArgb(35, 15, 23, 42)))
+        using (var shadow = new SolidBrush(Theme.Shadow(70)))
             g.FillEllipse(shadow, thumb.X, thumb.Y + Px(1), d, d);
-        using (var white = new SolidBrush(Color.White))
-            g.FillEllipse(white, thumb);
-        using (var ring = new Pen(Theme.Accent, Px(2)))
+        using (var knob = new SolidBrush(Theme.Accent))
+            g.FillEllipse(knob, thumb);
+        using (var ring = new Pen(Theme.BorderStrong, Px(2)))
             g.DrawEllipse(ring, RectangleF.Inflate(thumb, -Px(1), -Px(1)));
     }
 }
@@ -914,7 +912,7 @@ internal sealed class NavItem : ThemedControl
         if (_selected)
         {
             using var path = Theme.RoundedRect(rect, Px(Theme.Radius));
-            using var brush = new SolidBrush(Color.FromArgb(220, 255, 255, 255));
+            using var brush = new SolidBrush(Theme.Overlay(23));
             g.FillPath(brush, path);
             using var hair = new Pen(Glass.Hairline, 1f);
             g.DrawPath(hair, path);
@@ -922,7 +920,7 @@ internal sealed class NavItem : ThemedControl
         else if (_hover)
         {
             using var path = Theme.RoundedRect(rect, Px(Theme.Radius));
-            using var brush = new SolidBrush(Color.FromArgb(110, 255, 255, 255));
+            using var brush = new SolidBrush(Theme.Overlay(12));
             g.FillPath(brush, path);
         }
 
@@ -968,7 +966,7 @@ internal sealed class StatTile : ThemedControl
         var rect = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
         using (var path = Theme.RoundedRect(rect, Px(Theme.Radius)))
         {
-            using var fill = new SolidBrush(Color.FromArgb(130, 255, 255, 255));
+            using var fill = new SolidBrush(Theme.Overlay(14));
             g.FillPath(fill, path);
             using var pen = new Pen(Glass.Hairline, 1f);
             g.DrawPath(pen, path);
@@ -1017,7 +1015,7 @@ internal sealed class StepPreview : ThemedControl
         var box = new RectangleF(Px(20), Px(4), Width - Px(40), Height - Px(16));
         using (var path = Theme.RoundedRect(box, Px(Theme.Radius)))
         {
-            using var fill = new SolidBrush(Color.FromArgb(120, 255, 255, 255));
+            using var fill = new SolidBrush(Theme.Overlay(14));
             g.FillPath(fill, path);
             using var hair = new Pen(Glass.Hairline, 1f);
             g.DrawPath(hair, path);
@@ -1032,7 +1030,7 @@ internal sealed class StepPreview : ThemedControl
         double examplePct = Math.Round(70.0 / _step) * _step;
         float fillW = (float)(Math.Clamp(examplePct, 0, 100) / 100.0) * barW;
         using (var track = Theme.RoundedRect(new RectangleF(barX, barY, barW, ch), ch / 2))
-        using (var trackBrush = new SolidBrush(Color.FromArgb(34, 15, 23, 42)))
+        using (var trackBrush = new SolidBrush(Theme.Overlay(34)))
             g.FillPath(trackBrush, track);
         if (fillW > ch)
         {
@@ -1043,7 +1041,7 @@ internal sealed class StepPreview : ThemedControl
 
         // A tick at every grid step
         int steps = Math.Max(1, (int)Math.Round(100.0 / _step));
-        using (var tick = new SolidBrush(Color.FromArgb(150, 255, 255, 255)))
+        using (var tick = new SolidBrush(Theme.Shadow(110)))
         {
             for (int i = 1; i < steps; i++)
             {
@@ -1173,7 +1171,7 @@ internal sealed class Stepper : ThemedControl
         float radius = Px(Theme.Radius);
         using (var path = Theme.RoundedRect(rect, radius))
         {
-            using var fill = new SolidBrush(Color.FromArgb(185, 255, 255, 255));
+            using var fill = new SolidBrush(Theme.Overlay(16));
             g.FillPath(fill, path);
             using var pen = new Pen(Focused && ShowFocusCues ? Color.FromArgb(150, Theme.Accent) : Glass.Hairline, 1f);
             g.DrawPath(pen, path);
@@ -1186,7 +1184,7 @@ internal sealed class Stepper : ThemedControl
             if (enabled && _hoverZone == zone)
             {
                 float r = Px(12);
-                using var hover = new SolidBrush(Color.FromArgb(28, 15, 23, 42));
+                using var hover = new SolidBrush(Theme.Overlay(28));
                 g.FillEllipse(hover, cx - r, Height / 2f - r, 2 * r, 2 * r);
             }
             using var pen = new Pen(enabled ? Theme.Text : Theme.TextFaint, Px(1.6f)) { StartCap = LineCap.Round, EndCap = LineCap.Round };
